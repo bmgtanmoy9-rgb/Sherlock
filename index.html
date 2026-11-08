@@ -2,6 +2,71 @@
 <html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      (function () {
+        function isViteWsError(val) {
+          var msg = val && (val.message || String(val));
+          return (
+            typeof msg === 'string' &&
+            (msg.indexOf('WebSocket closed without opened') !== -1 ||
+              msg.indexOf('failed to connect to websocket') !== -1 ||
+              msg.indexOf('vite-hmr') !== -1)
+          );
+        }
+        window.addEventListener(
+          'unhandledrejection',
+          function (event) {
+            if (event && isViteWsError(event.reason)) {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+            }
+          },
+          true
+        );
+        window.addEventListener(
+          'error',
+          function (event) {
+            if (event && (isViteWsError(event.error) || isViteWsError(event.message))) {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+            }
+          },
+          true
+        );
+        var NativeWebSocket = window.WebSocket;
+        if (typeof NativeWebSocket === 'function') {
+          function SafeWebSocket(url, protocols) {
+            var protoStr = Array.isArray(protocols) ? protocols.join(',') : String(protocols || '');
+            var urlStr = String(url || '');
+            if (protoStr.indexOf('vite-hmr') !== -1 || protoStr.indexOf('vite-ping') !== -1 || urlStr.indexOf('?token=') !== -1) {
+              var target = new EventTarget();
+              target.url = urlStr;
+              target.protocol = protoStr;
+              target.readyState = 1;
+              target.send = function () {};
+              target.close = function () {
+                target.readyState = 3;
+              };
+              setTimeout(function () {
+                try {
+                  var openEvt = new Event('open');
+                  if (typeof target.onopen === 'function') target.onopen(openEvt);
+                  target.dispatchEvent(openEvt);
+                } catch (_e) {}
+              }, 0);
+              return target;
+            }
+            return protocols !== undefined ? new NativeWebSocket(url, protocols) : new NativeWebSocket(url);
+          }
+          SafeWebSocket.prototype = NativeWebSocket.prototype;
+          SafeWebSocket.CONNECTING = NativeWebSocket.CONNECTING;
+          SafeWebSocket.OPEN = NativeWebSocket.OPEN;
+          SafeWebSocket.CLOSING = NativeWebSocket.CLOSING;
+          SafeWebSocket.CLOSED = NativeWebSocket.CLOSED;
+          window.WebSocket = SafeWebSocket;
+        }
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#170E0B" />
     <title>SHERLOCK — The AI Digital Detective | Investigate before you trust</title>

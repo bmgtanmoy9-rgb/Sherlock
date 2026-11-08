@@ -1,90 +1,76 @@
-# Complete 2026 Website SEO & Search Engine Ranking Plan — SHERLOCK
+# SHERLOCK — Permanent Vite WebSocket & Preview Stability Fix
 
-## 1. Executive Summary & SEO Strategy
+Permanently eliminates the `Error: WebSocket closed without opened.` runtime failure caused by `/@vite/client` attempting to open an HMR WebSocket connection in the cloud preview environment, ensuring uninterrupted interaction across the entire application.
 
-We will execute a comprehensive Search Engine Optimization (SEO) upgrade across **SHERLOCK (221B Digital Link Forensics)** aligned with the **Complete Website SEO Guide (2026)**. The goal is to maximize organic search visibility, crawlability, semantic authority, and rich-result eligibility on Google and modern AI search engines while preserving the Victorian 221B detective aesthetic and strict evidence-based safety framing.
+## User Review & Critical Decisions
 
-### Primary & Secondary Keyword Strategy
-- **Primary Keyword Cluster**: `phishing link checker`, `website safety scanner`, `scam URL detector`
-- **High-Intent Secondary Keywords**: `suspicious link inspector`, `check if a website is legit`, `QR code phishing scanner`, `domain age and SSL checker`, `WHOIS RDAP lookup tool`, `fake login page detector`
-- **Search Intent Alignment**: Informational ("how to spot a phishing link", "what is lookalike domain spoofing") + Transactional/Utility ("scan a suspicious URL or QR code immediately without opening it").
+> [!IMPORTANT]
+> The decisions below incorporate your confirmed preferences from our clarification check.
 
----
-
-## 2. SEO Architecture & Search Crawler Pipeline
-
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                     SEARCH ENGINES & SOCIAL CRAWLERS                         │
-│        (Googlebot, Google Search Console, Bingbot, X/Twitter, OpenGraph)     │
-└───────────────┬──────────────────────────────────────────────┬───────────────┘
-                │                                              │
-                ▼                                              ▼
-┌─────────────────────────────────────────┐  ┌─────────────────────────────────┐
-│     SERVER-SIDE TECHNICAL SEO           │  │     DOCUMENT HEAD & SCHEMA      │
-│  • GET /robots.txt                      │  │  • Optimized <title> & <meta>   │
-│    - Crawl rules & /api/ protections    │  │  • Canonical URL resolution     │
-│    - Dynamic Sitemap URL pointer        │  │  • OpenGraph & Twitter Cards    │
-│  • GET /sitemap.xml                     │  │  • Google Search Console tag    │
-│    - Dynamic XML <urlset> generation    │  │  • Schema.org JSON-LD @graph:   │
-│    - All 7 Study Sections + Case URLs   │  │    - WebApplication             │
-│  • GET /api/seo-audit                   │  │    - Organization               │
-│    - Live 2026 SEO Checklist & Score    │  │    - HowTo (Link Inspection)    │
-└───────────────┬─────────────────────────┘  │    - FAQPage (High-Intent Q&A)  │
-                │                            └─────────────────┬───────────────┘
-                ▼                                              │
-┌──────────────────────────────────────────────────────────────┴───────────────┐
-│                   CLIENT-SIDE SEMANTIC & CONTENT SEO ENGINE                  │
-│  • Dynamic Per-Section Metadata Synchronizer (#home, #guide, #index, etc.)   │
-│    - Updates document.title, meta description, canonical, & OG tags live     │
-│    - Updates title & meta dynamically when inspecting a specific domain      │
-│  • Semantic HTML5 & Accessibility Hierarchy                                  │
-│    - Strict H1 → H2 → H3 hierarchy, <main>, <article>, <section>, <nav>      │
-│    - Image SEO: descriptive alt text, explicit dimensions, lazy decoding     │
-│  • Internal Cross-Linking & High-Intent Forensic FAQ + SEO Audit Ledger      │
-│    - Contextual anchor links connecting all 7 investigative rooms            │
-│    - Interactive Search Console Readiness & 2026 SEO Score Dossier           │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
+- **Confirmed Decision 1 — Safe Vite Client Stub & HTTP Server Attachment**: Intercept requests to `/@vite/client` in the Express middleware pipeline to serve a lightweight, WebSocket-free ESM runtime stub (`createHotContext`, `updateStyle`, `removeStyle`, `injectQuery`) while also binding the underlying Node `http.Server` instance to Vite middleware mode.
+- **Confirmed Decision 2 — Silent Early Suppression of Dev WebSocket Errors**: Inject a zero-dependency guard as the very first script in `<head>` (before Vite's module scripts execute) to intercept dev-only WebSocket instantiation and silently suppress any non-critical dev WebSocket rejections.
 
 ---
 
-## 3. Core Implementation Pillars
+## 1. Overview & Core Concept
 
-### Pillar 1: Technical SEO & Google Search Console Readiness
-- **Dynamic `/robots.txt` Endpoint**:
-  - Serves `text/plain` instructions welcoming all search engine crawlers (`User-agent: *`, `Allow: /`) while disallowing raw private mutation endpoints (`Disallow: /api/report`) and dynamically advertising `Sitemap: <origin>/sitemap.xml`.
-- **Dynamic `/sitemap.xml` Endpoint**:
-  - Serves valid `application/xml` with `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`.
-  - Automatically indexes the root application (`/`), all 7 investigative rooms (`/#home`, `/#guide`, `/#index`, `/#actions`, `/#witness`, `/#safety`, `/#proof`), and active public shared case reports (`/?case=<caseId>`) with accurate `<lastmod>`, `<changefreq>`, and `<priority>` attributes.
-- **Google Search Console Verification & Crawler Directives**:
-  - Adds `<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />` and `<meta name="googlebot" ... />`.
-  - Supports `<meta name="google-site-verification" ... />` via environment configuration (`VITE_GOOGLE_SITE_VERIFICATION`) plus an interactive Search Console Setup & Verification helper inside the Study Ledger so site owners can copy their verification tag or inspect live `/sitemap.xml` and `/robots.txt` endpoints directly.
-- **Live Technical SEO Audit Endpoint (`GET /api/seo-audit`)**:
-  - Evaluates the live application against the 2026 SEO Checklist (Sitemap, Robots.txt, HTTPS/HSTS, Metadata, Schema.org JSON-LD, Semantic Headings, Internal Linking, Image Optimization, Mobile Responsiveness, and Fast Load headers) and returns a structured audit summary, keyword opportunities, and overall SEO score.
+- **What It Does**: Prevents Vite's injected client script (`/@vite/client`) from attempting a broken WebSocket handshake over the cloud proxy (`wss://ais-dev-.../@vite/client`) that triggers an unhandled promise rejection and blocks user interaction.
+- **Target Audience / Persona**: Every visitor and evaluator opening SHERLOCK in the AI Studio preview or shared Cloud Run URL.
+- **Key Value**: 100% crash-free startup with zero WebSocket error overlays, preserving the fast 3–5 second website investigation experience.
 
-### Pillar 2: Document Head, OpenGraph, Twitter Cards & Schema.org JSON-LD
-- **Title & Meta Description Synchronization**:
-  - Primary Title: `SHERLOCK — Phishing Link Checker, Website Safety Scanner & Scam URL Detector`
-  - Primary Description (154 chars): `Inspect suspicious URLs, QR codes, DNS, WHOIS domain age, SSL certificates, and community scam reports with SHERLOCK's forensic website safety scanner.`
-- **Social Sharing Cards**:
-  - Full OpenGraph (`og:title`, `og:description`, `og:type`, `og:url`, `og:site_name`, `og:image`, `og:image:alt`, `og:locale`) and Twitter (`twitter:card`, `twitter:title`, `twitter:description`, `twitter:image`, `twitter:image:alt`) metadata.
-- **Rich Schema.org Structured Data (`application/ld+json`)**:
-  - Multi-entity `@graph` combining:
-    1. **`WebApplication`**: Categorized as `SecurityApplication` with `featureList` covering DNS/RDAP WHOIS lookup, X.509 SSL inspection, QR code decoding, homograph detection, and Google Search-grounded scam analysis.
-    2. **`Organization`**: Branding and authority signals for `SHERLOCK — 221B Digital Link Forensics`.
-    3. **`HowTo`**: Step-by-step structured guide on *"How to Check if a Website or Link is a Phishing Scam Before Clicking"*.
-    4. **`FAQPage`**: Rich-snippet eligible Q&A targeting high-ranking queries (*"How do I check if a link is safe without clicking it?"*, *"How does a QR code phishing scanner work?"*, *"Can a phishing website have a valid HTTPS padlock?"*, *"How do I check when a website domain was registered?"*).
+---
 
-### Pillar 3: Dynamic Per-Section & Per-Case SEO Synchronizer
-- **View-Aware Head Updates**:
-  - Navigating across the 7 rooms (`#home`, `#guide`, `#index`, `#actions`, `#witness`, `#safety`, `#proof`) or inspecting a live domain report dynamically updates `document.title`, `<meta name="description">`, `<link rel="canonical">`, `og:title`, and `og:description` to match the active section or inspected domain (`e.g., "SHERLOCK Dossier: paypaI-secure-update.com — Risk 92/100 | Website Safety Scanner"`).
+## 2. User Experience & Visual Design
 
-### Pillar 4: Content SEO, Semantic HTML, Image SEO & Internal Linking
-- **Semantic Heading & Landmark Hierarchy**:
-  - Enforces a single authoritative `<h1>` per active view, structured `<h2>` and `<h3>` subheadings enriched with natural forensic and security keywords, and semantic `<main>`, `<section>`, `<article>`, `<nav>`, and `<footer>` landmarks.
-- **Image & Media SEO**:
-  - Adds descriptive keyword-rich `alt` attributes, explicit `width` and `height` attributes to prevent Cumulative Layout Shift (CLS), and `loading="lazy"` / `decoding="async"` on non-hero visual assets.
-- **Internal Cross-Linking & High-Intent FAQ + 2026 SEO Readiness Ledger**:
-  - Adds contextual internal anchor links between the Case Desk, Field Guide, Threat Index, Emergency Actions, Witness Ledger, Safety Disclaimers, and Forensic Proof sections.
-  - Adds a dedicated **Frequently Asked Questions & Search Engine Verification Ledger** inside the study sections featuring the live 2026 SEO Audit Score, keyword opportunity matrix, direct links to `/sitemap.xml` and `/robots.txt`, and structured FAQ accordion/cards.
+- **Key User Flows**:
+  1. **Zero-Error Application Startup**: When the user loads or refreshes SHERLOCK, the browser receives a clean, WebSocket-free `/@vite/client` module and immediately renders the Victorian Detective Study without any runtime error overlay.
+  2. **Uninterrupted Investigation Desk**: Users can type or paste any link, click **Investigate**, inspect real internet assets, or verify non-existent domains on GoDaddy without background WebSocket rejections interrupting the UI.
+- **Visual Identity & Theme**:
+  - *Aesthetic Direction*: Victorian Detective Study (`--walnut-900`, `--walnut-850`, `--brass-500`, `--oxblood-700`, `--parchment-100`).
+  - *Typography & Hierarchy*: `Cormorant Garamond` display headers, `Source Serif 4` body copy, and `IBM Plex Mono` (`tabular-nums`) for technical asset telemetry and timestamps.
+  - *Component Styling & Layout*: Single-elevation dossier cards with 1px brass hairline borders, responsive mobile/desktop layout, and clean unboxed metadata.
+- **Interactive Feedback & Motion**: Smooth NDJSON streaming progress updates during the 3–5 second parallel investigation without UI freezes or overlays.
+
+---
+
+## 3. Key Product Decisions & Trade-Offs
+
+- **Decision 1: Intercept `/@vite/client` with a Safe ESM Stub in Express**
+  - *Chosen Approach*: Register a dedicated Express route for `/@vite/client` before `vite.middlewares` that returns a valid ES module exporting Vite's client hooks (`createHotContext`, `updateStyle`, `removeStyle`, `injectQuery`) as safe no-op functions without opening a `new WebSocket(...)`.
+  - *Why*: In Vite 8 middleware mode, Vite's `transformIndexHtml` automatically prepends `<script type="module" src="/@vite/client"></script>` to the top of `<head>`, which runs before any `<body>` scripts and throws an unhandled rejection when the cloud proxy closes the WebSocket. Serving a WebSocket-free stub for `/@vite/client` stops the faulty WebSocket from ever being created while keeping CSS injection and React module imports working seamlessly.
+  - *Alternatives Considered*: Relying solely on `hmr: false` in `vite.config.ts` was insufficient because Vite 8's client script still initializes its server-connection WebSocket unless `/@vite/client` itself is stubbed or pre-guarded.
+- **Decision 2: First-in-`<head>` WebSocket & Unhandled Rejection Shield**
+  - *Chosen Approach*: Place an inline `<script>` at the very top of `<head>` (line 4 of the HTML document) that wraps `window.WebSocket` for Vite HMR subprotocols (`vite-hmr` / `vite-ping`) and registers `unhandledrejection` and `error` listeners before any module script executes.
+  - *Why*: Guarantees that even if the browser has a cached copy of `/@vite/client`, any `vite-hmr` WebSocket call or rejection is neutralized before it can trigger an error overlay.
+
+---
+
+## 4. Technical Architecture & Data Strategy *(Technical Reference)*
+
+### Architecture & Request Pipeline Diagram
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                        Browser Startup & Request Flow                      │
+├────────────────────────────────────────────────────────────────────────────┤
+│  1. GET / (HTML Document)                                                  │
+│     └── Top-of-<head> Inline Shield initializes BEFORE any module scripts: │
+│         ├── Wraps window.WebSocket for 'vite-hmr' / 'vite-ping' protocols  │
+│         └── Suppresses 'WebSocket closed without opened' rejections        │
+│                                                                            │
+│  2. GET /@vite/client (Intercepted by Express before Vite Middleware)      │
+│     └── Returns safe ESM no-op stub (createHotContext, updateStyle, etc.)  │
+│         └── Zero WebSocket connections opened by @vite/client              │
+│                                                                            │
+│  3. Node HTTP Server + Vite Middleware + Fast 3–5s Investigation API       │
+│     ├── http.createServer(app) bound to port 3000                          │
+│     ├── CSS & React TSX transforms served cleanly via vite.middlewares     │
+│     └── POST /api/investigate streams 8-stage real asset & review checks   │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Interactive Component & State Mapping
+
+- **Express `/@vite/client` Interceptor**: Responds with `Content-Type: application/javascript; charset=utf-8` and `Cache-Control: no-store`, exporting `createHotContext`, `updateStyle`, `removeStyle`, and `injectQuery` so all Vite-transformed React and Tailwind CSS modules execute with zero WebSocket activity.
+- **Top-of-`<head>` Browser Guard**: Intercepts `new WebSocket(url, protocols)` when `protocols` is `vite-hmr` or `vite-ping`, returning an inert event-target mock so cached Vite client scripts never throw `WebSocket closed without opened`.
+- **Vite Config & HTTP Server Binding**: Aligns `vite.config.ts` (`hmr: false`, `watch: null`) and `http.createServer(app)` in the backend server so dev and production modes behave identically without port or WebSocket conflicts.

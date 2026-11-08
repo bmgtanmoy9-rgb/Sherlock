@@ -1,6 +1,6 @@
 {
-  "summary":  "Complete 2026 Website SEO & Search Engine Ranking Implementation Plan for SHERLOCK, covering dynamic /robots.txt and /sitemap.xml routes, Google Search Console readiness, Schema.org JSON-LD (@graph with WebApplication, FAQPage, HowTo, Organization), OpenGraph & Twitter Cards, dynamic per-section metadata synchronization, semantic HTML/image optimization, and an on-page SEO Audit & FAQ Ledger.",
-  "updatedAt":  "2026-11-08T20:12:20.537801619Z",
+  "summary":  "Implementation plan to permanently eliminate the Vite WebSocket connection error (`Error: WebSocket closed without opened.`) in the preview environment by intercepting `/@vite/client` with a safe ESM stub, attaching the Node HTTP server instance, and installing an early `<head>` WebSocket & rejection shield.",
+  "updatedAt":  "2026-11-08T22:01:12.388561229Z",
   "requestFeedback":  true,
   "userFacing":  true
 }
