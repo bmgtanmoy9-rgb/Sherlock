@@ -1,97 +1,86 @@
-# Backend Score Tally Synchronization & Full-Spectrum Anti-Hacker Hardening
+# SHERLOCK — Ultra-Responsive 2–3s Forensic Check Ledger Across All Devices
 
-This update synchronizes the deterministic score breakdown and arithmetic tally metadata across all backend investigation and archive endpoints while hardening the server against web attacks—including SSRF DNS rebinding, injection/XSS payloads, prototype pollution, brute-force scraping, and cross-origin abuse.
+Upgrades SHERLOCK's **Forensic Check Ledger** and backend investigation pipeline to deliver immediate visual feedback, live per-check millisecond timings, anti-buffered NDJSON stage streaming, immediate auto-scroll on mobile and desktop, and a unified **2 to 3 second** end-to-end execution budget.
 
 ## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> The following architectural and security decisions reflect your confirmed choices before implementation begins:
+> The decisions below reflect your confirmed choices from our clarification check.
 
-- **Confirmed Decision 1 — Full Score Tally Metadata in All API Responses**: Every backend case response (live investigations, cached reports, demo presets, and archived case lookups) will include structured `scoreTally` reconciliation metadata (`categoryPointsSum`, `maxPossibleSum`, `overrideAdjustment`, `clampingAdjustment`, `finalIndex`, and enriched `categoryBreakdown` rows with `rawPoints` and `clueCount`).
-- **Confirmed Decision 2 — Four-Layer Backend Security Hardening**:
-  1. **Strict HTTP Security Headers & CORS**: Enforces Content-Security-Policy (CSP), HTTP Strict-Transport-Security (HSTS), `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy`, and strict origin/method validation, plus HTTP `Range` support for smooth mobile video streaming.
-  2. **Enhanced SSRF & DNS Rebinding Guard**: Expands IPv4/IPv6/decimal/octal/hex literal blocking and pins resolved public DNS addresses during outbound inspection and TLS checks to prevent TOCTOU (Time-of-Check to Time-of-Use) DNS rebinding attacks.
-  3. **Strict Input Sanitization & Payload Validation**: Strips prototype pollution keys (`__proto__`, `constructor`, `prototype`), null bytes, control characters, and SQL/script injection vectors across all query parameters, route parameters, headers, and JSON bodies.
-  4. **Multi-Tier API Rate Limiting & Brute-Force Protection**: Enforces sliding-window rate limits per salted cryptographic client hash across `/api/investigate`, `/api/report`, `/api/reviews`, and `/api/case/:id` to stop automated flood or enumeration attacks.
-- **Confirmed Decision 3 — Safe JSON Error Responses**: Whenever the backend blocks a malicious payload, disallowed origin, SSRF vector, or rate-limit violation, it immediately halts processing and returns a sanitized, non-leaking JSON error response without exposing stack traces or internal server details.
+- **Confirmed Decision 1 — 2 to 3 Second Balanced Mode with Extended Search Grounding**: Launch all 8 forensic checks and Google Search user-experience grounding concurrently at millisecond zero (`t = 0ms`), eliminating sequential handoffs so the entire dossier completes in **2.0 to 2.9 seconds**.
+- **Confirmed Decision 2 — Immediate Auto-Scroll & Live Millisecond Timings Per Check**: Automatically scroll the viewport to the **Forensic Check Ledger** the instant **Investigate** is tapped on mobile, tablet, or desktop, and display a live millisecond timer (`tabular-nums`) and progress bar for each of the 8 checks.
 
 ---
 
 ## 1. Overview & Core Concept
 
-- **What It Does**:
-  1. **Server-Authoritative Score Tally**: Computes and attaches complete category breakdown and tally proof metadata on the backend so any client or shared report link receives pre-verified arithmetic reconciliation.
-  2. **Defense-in-Depth Server Hardening**: Protects the backend server and its outbound passive fetcher against SSRF, DNS rebinding, header/body injection, XSS, prototype pollution, and automated DoS/brute-force attacks.
-- **Target Audience / Persona**: Security-conscious users and evaluators who rely on SHERLOCK to inspect untrusted URLs safely without exposing the backend infrastructure or user browsers to exploitation.
-- **Key Value**: Guarantees that backend API outputs match the frontend deterministic score breakdown 1:1 while locking down every attack surface of the server.
+- **What It Does**: Eliminates proxy stream buffering and sequential server waits so every user—on phone, tablet, or desktop—immediately sees the **Forensic Check Ledger** come alive within 50ms of tapping **Investigate**, with each of the 8 checks ticking off with real millisecond timings and delivering the full Case Report within 2 to 3 seconds.
+- **Target Audience / Persona**: Mobile, tablet, and desktop users inspecting suspicious links or QR codes who expect instant, transparent visual progress.
+- **Key Value**: Zero perceived lag on mobile or desktop, unbuffered real-time stage updates, live millisecond telemetry (`tabular-nums`), and guaranteed 2–3 second dossier delivery.
 
 ---
 
 ## 2. User Experience & Visual Design
 
 - **Key User Flows**:
-  1. **Live & Shared Case Dossiers**: Whether a user runs a fresh investigation or opens a shared `?case=CASE-...` link, the backend automatically enriches and validates the full `categoryBreakdown` and `scoreTally` object so the **Deterministic Score Breakdown by Category** and **Forensic Score Calculation Tally** render with verified server calculations.
-  2. **Defensive Interception of Malicious Requests**: If an attacker or automated script submits malformed payloads, private/encoded IP literals (e.g., hex/octal localhost, IPv6 mapped loopback, cloud metadata), or rapid-fire brute-force requests, the server intercepts the request at the middleware boundary and returns a clean, structured JSON error (`400`, `403`, or `429`).
+  1. **Instant Mobile & Desktop Auto-Scroll (`t = 0ms`)**: As soon as the user submits a link, selects a sample case, or scans a QR code, the viewport smoothly scrolls straight to the **Forensic Check Ledger** so mobile users never have to scroll past the hero banner to see progress.
+  2. **Live 8-Stage Ledger with Millisecond Counters & Progress Bar**:
+     - Header displays an animated 0–100% completion progress bar, completed check count (`e.g., 6 / 8 checks complete`), and a live elapsed timer (`1.4s`).
+     - Each of the 8 check rows displays its live state (`Inspecting…`, `Done`, `Timed out`, `Failed`), a brief stage summary, and its exact completion duration in monospace tabular figures (`e.g., 180ms`, `640ms`).
+     - Interactive stage rows allow clicking any completed check in the ledger to jump directly to the corresponding forensic evidence below.
+  3. **Seamless Dossier Reveal (`t = 2.0s–2.9s`)**: As the 8th check finishes, the full Case Report unfolds directly beneath the ledger with the total inspection duration badge.
 - **Visual Identity & Theme**:
-  - Preserves the Victorian Detective Study aesthetic (`#170E0B` walnut, `#5A1F26` oxblood, `#C9A04A` antique brass, `#F2E6C9` parchment) and displays blocked or rate-limited responses in the existing defensive notice cards.
-- **Interactive Feedback & Motion**:
-  - Instant server validation responses (`< 10ms` for blocked inputs) and seamless byte-range video streaming for mobile and desktop hero media.
+  - *Aesthetic Direction*: Victorian Detective Study (`--walnut-900`, `--walnut-850`, `--brass-500`, `--oxblood-700`, `--parchment-100`).
+  - *Typography & Hierarchy*: `Cormorant Garamond` display headers, `Source Serif 4` body copy, and `IBM Plex Mono` (`tabular-nums`) for all millisecond counters, stage completion badges, and progress metrics so numbers never jitter during live updates.
+  - *Component Styling & Layout*: Responsive 1-column mobile / 2-column desktop ledger grid with minimum `44px` touch targets, single-elevation cards, and clean unboxed metadata.
 
 ---
 
 ## 3. Key Product Decisions & Trade-Offs
 
-- **Decision 1: Server-Side Score Tally Enrichment on Both New and Stored Cases**
-  - *Chosen Approach*: Add a pure `computeScoreTally` helper in the rule engine and invoke it in all backend case-generation and retrieval routes, automatically upgrading any legacy cached or stored case records on read.
-  - *Why*: Ensures 100% consistency across cached cases, demo cases, and live investigations without requiring manual database migrations.
-- **Decision 2: Zero-Leakage Security Middleware Pipeline**
-  - *Chosen Approach*: Implement custom zero-dependency security middleware directly in the backend request pipeline (security headers, CORS check, prototype-pollution & control-char scrubber, per-endpoint rate limiters, and global error sanitizer).
-  - *Why*: Avoids external middleware version conflicts while giving full control over NDJSON streaming endpoints and Vite asset serving.
+- **Decision 1: Defeat Reverse-Proxy Stream Buffering (`X-Accel-Buffering: no` + `res.flushHeaders()` + Padded Chunks)**
+  - *Chosen Approach*: Configure `POST /api/investigate` with `X-Accel-Buffering: no`, `Content-Encoding: identity`, immediate `res.flushHeaders()`, and padded NDJSON lines so cloud proxies flush every stage update immediately rather than holding 4 KB buffers until `res.end()`.
+  - *Why*: Previously, small 45-byte NDJSON stage lines were buffered by the cloud proxy until the entire request finished, making the Forensic Check Ledger appear frozen until the end.
+- **Decision 2: Single-Wave Parallel Pipeline (`t = 0ms` Launch) + Fast Direct RDAP Lookup**
+  - *Chosen Approach*: Start DNS verification, RDAP registry lookup (routing `.com`/`.net`/`.org` directly to authoritative RDAP servers before falling back to `rdap.org`), HTTP/HTML inspection, TLS handshake, reputation feeds, and `gemini-3.8-flash` search grounding concurrently in a single parallel wave capped at `1.8s`, followed by an instant or `<= 800ms` bounded deduction.
+  - *Why*: Eliminates the sequential `DNS -> Network Checks -> LLM Deduction` chain that previously stacked timeouts to 4–6 seconds, bringing total wall-clock time strictly into the **2 to 3 second** window.
 
 ---
 
 ## 4. Technical Architecture & Data Strategy *(Technical Reference)*
 
-- **Architecture & Component Diagram**:
+### Architecture & Zero-Latency Streaming Diagram
 
 ```
-┌───────────────────────────────────────────────────────────────────────────┐
-│                         Incoming Client / API Request                     │
-└─────────────────────────────────────┬─────────────────────────────────────┘
-                                      ▼
-┌───────────────────────────────────────────────────────────────────────────┐
-│                    Layer 1: Security & Hardening Middleware                │
-│  ├─ Defensive Headers (CSP, HSTS, X-Frame-Options, nosniff, Permissions)  │
-│  ├─ Strict CORS & HTTP Method Guard + Safe JSON Error Boundary            │
-│  ├─ Payload Sanitizer (Prototype Pollution, Null Bytes, XSS/Control Chars)│
-│  └─ Multi-Tier Rate Limiter (Per-Endpoint Salted SHA-256 Sliding Windows) │
-└─────────────────────────────────────┬─────────────────────────────────────┘
-                                      ▼
-┌───────────────────────────────────────────────────────────────────────────┐
-│                    Layer 2: Outbound SSRF & Network Guard                  │
-│  ├─ Strict URL Parser (Blocks Hex/Octal/Decimal IPs, Bad Ports, Userinfo) │
-│  ├─ DNS Resolution & IP Pinning Verifier (Blocks Rebinding & RFC1918/LL)  │
-│  └─ Air-Gapped Fetcher (256KB Cap, 5-Hop Manual Redirect Re-verification) │
-└─────────────────────────────────────┬─────────────────────────────────────┘
-                                      ▼
-┌───────────────────────────────────────────────────────────────────────────┐
-│             Layer 3: Deterministic Rule Engine & Tally Assembler          │
-│  ├─ 8 Category Weights + Raw/Clamped Point Sums + Triggered Clue Counts   │
-│  ├─ Reputation Override & 100-Point Ceiling Reconciliation (`scoreTally`) │
-│  └─ Sanitized Case Archive & Salted Vote/Report Persistence               │
-└───────────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────┐
+│               Client Device (Mobile / Tablet / Desktop)                    │
+├────────────────────────────────────────────────────────────────────────────┤
+│  1. User taps "Investigate" (t = 0ms)                                      │
+│     ├── Smoothly scrolls viewport to Forensic Check Ledger immediately     │
+│     ├── Starts 60fps requestAnimationFrame / 100ms live elapsed timer      │
+│     └── Renders 8-stage progress bar & per-stage tabular-nums ms counters  │
+│                                                                            │
+│  2. Anti-Buffered NDJSON Stream (POST /api/investigate)                    │
+│     ├── Headers: X-Accel-Buffering: no, Cache-Control: no-cache            │
+│     ├── Immediate res.flushHeaders() + padded stage chunks                 │
+│     └── Emits { type: 'stage', stage, status, durationMs, detail }         │
+│                                                                            │
+│  3. Unified Parallel Server Wave (t = 0ms to 1,850ms max)                  │
+│     ├── Stage 1 & 2: Domain Identity + Brand Impersonation (< 15ms)        │
+│     ├── DNS A/AAAA + NS Existence Check (<= 950ms parallel)                │
+│     ├── Stage 3: Direct Authoritative RDAP WHOIS Lookup (<= 1,350ms)       │
+│     ├── Stage 4: Threat & Phishing Reputation Feeds (<= 1,100ms)           │
+│     ├── Stage 5 & 7: HTTP Redirects, HTML DOM & Security Headers (<=1,450ms│
+│     ├── Stage 6: TLS X.509 Socket Handshake (<= 1,200ms)                   │
+│     └── Stage 8: Witness DB + Gemini 3.8 Flash Search Grounding (<=1,800ms)│
+│                                                                            │
+│  4. Fast Deduction & Dossier Assembly (Completed in 2.0s – 2.9s total)     │
+│     └── Emits { type: 'complete', report } + non-blocking store archival   │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Data Model & State**:
-  - `ScoreTallySummary` interface added to `CaseReportData`:
-    - `categoryPointsSum`: Sum of clamped points across the 8 forensic categories (`0–118`).
-    - `rawCategoryPointsSum`: Unclamped sum of all clue points across the 8 categories.
-    - `maxPossibleCategorySum`: Fixed `118` maximum category weight sum.
-    - `overrideActive`: Boolean indicating whether a threat feed override (`≥ 90`) fired.
-    - `overrideAdjustment`: Points added by the Reputation Override rule (`0` or `90 - categoryPointsSum`).
-    - `clampingAdjustment`: Points subtracted by the 100-point ceiling (`0` or `categoryPointsSum - 100`).
-    - `finalIndex`: Final Suspicion Index (`0–100` or `null` when inconclusive).
-- **Interactive Component & State Mapping**:
-  - **`POST /api/investigate`**: Validates input against SSRF/injection guards, streams 8 check stages, computes `categoryBreakdown` and `scoreTally`, and returns the complete `CaseReportData`.
-  - **`GET /api/case/:id`**: Validates `:id` format (`^CASE-[A-Z0-9-]+$`), rate-limits enumeration attempts, upgrades stored case records with fresh `categoryBreakdown` and `scoreTally` metadata, and returns safe JSON.
-  - **`POST /api/report` & `POST /api/reviews`**: Enforces strict schema validation, strips HTML/script tags and control characters, applies per-endpoint rate limits, and returns structured JSON responses.
+### Interactive Component & State Mapping
+
+- **Extended `CheckProgressEvent` Telemetry**: Each streamed `stage` event carries `durationMs?: number` and `detail?: string` (e.g., `"2 IPs resolved"`, `"Registrar: MarkMonitor"`, `"TLS 1.3 · Let's Encrypt"`, `"HTTP 200 · 4 headers"`), giving users real-time forensic visibility inside each row of the ledger as checks complete.
+- **Interactive Ledger Stage Rows**: Clicking any completed stage row in the Forensic Check Ledger scrolls smoothly to the corresponding section of the Case Report (`Live Internet Assets`, `Clues Found`, or `Public Web Experience`).
+- **Client-Side Stream Watchdog (`AbortController`)**: Enforces a hard client-side timeout and automatic progressive stage ticker so slow mobile cellular connections still experience smooth, responsive stage transitions without ever hanging.
