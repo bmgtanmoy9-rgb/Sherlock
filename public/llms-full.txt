@@ -1,0 +1,79 @@
+# SHERLOCK — The AI Digital Detective (Comprehensive AI & Search Reference)
+
+> Canonical URL: https://ais-pre-zd6t5bbhqlsgjgzmvqwzgo-226281853003.asia-southeast1.run.app/
+> Category: Cybersecurity, Phishing Detection, Domain Forensics, URL Reputation & Brand Impersonation Analysis
+> Tagline: Investigate before you trust. Every website leaves clues. SHERLOCK finds them.
+
+---
+
+## 1. Executive Overview
+SHERLOCK is an interactive digital forensics and website legitimacy investigation application designed in the tradition of a Victorian investigator's study ("221B Baker Street"). It empowers everyday consumers, cybersecurity analysts, fraud investigators, IT helpdesks, and online shoppers to verify whether a link, domain, or QR code is safe or deceptive before clicking, logging in, or submitting payment details.
+
+Unlike opaque binary URL blocklists that only say "Safe" or "Blocked", SHERLOCK performs a multi-layered passive forensic examination and presents an explainable **Case Dossier** showing:
+1. **Deterministic 0–100 Suspicion Index Score** with an itemized mathematical tally (`Base Score 0 + Triggered Risk Clues - Verified Trust Credits = Final Clamped Score`).
+2. **Real Internet Asset Footprint**: Live DNS records (A, AAAA, CNAME, MX, NS, TXT), RDAP WHOIS registration dates and domain age in days, TLS X.509 certificate issuer and validity window, HTTP status codes, security headers (HSTS, CSP, X-Frame-Options), redirect hop chains, and HTML DOM credential form inspection.
+3. **Public Web Experience & Reputation Signals**: Grounded discovery of public scam reports, user complaints, review platform presence, and trust discussions across the open web.
+4. **Non-Existent Domain (NXDOMAIN) Detection & GoDaddy Verification**: Immediate identification of unregistered or dead domains with one-click verification via GoDaddy Domain Search and GoDaddy WHOIS.
+5. **Plain-English Sherlockian Deductions**: Clear explanations of *why* a website is risky—including why a valid HTTPS padlock certificate does not mean a website is trustworthy.
+
+---
+
+## 2. Target Audience & Use Cases
+- **Everyday Internet Users & Online Shoppers**: Checking unfamiliar e-commerce stores, flash-sale links, WhatsApp/SMS delivery alerts, and social media ads.
+- **Corporate Employees & IT Security Teams**: Triaging suspected spear-phishing links, fake Microsoft/Google/PayPal/Bank login portals, and lookalike domains.
+- **Mobile Users Scanning QR Codes**: Decoding restaurant, parking meter, or package delivery QR codes ("quishing") to inspect hidden URLs and URL shorteners before opening them in a browser.
+- **Fraud & Brand Protection Analysts**: Inspecting newly registered domains (NRDs), homograph/punycode attacks, and brand-impersonation subdomains.
+
+---
+
+## 3. The 8-Stage Forensic Investigation Pipeline
+
+When a user submits a URL or scans a QR code, SHERLOCK executes 8 sequential forensic checks:
+
+1. **Stage 1 — Domain Identity & Lexical Structure (`domain_identity`)**
+   - Extracts the registrable apex domain (eTLD+1), subdomain depth, TLD risk profile, IP-literal hostnames, punycode (`xn--`) IDN homographs, and excessive hyphenation.
+2. **Stage 2 — Brand Impersonation & Lookalike Detection (`impersonation`)**
+   - Compares the hostname and page title against protected high-target brands (banks, payment networks, cloud providers, government portals, e-commerce leaders) using Levenshtein edit distance, homoglyph normalization, and deceptive keyword combinations (e.g., `secure-verify-login`, `account-update`).
+3. **Stage 3 — Domain Registration Age & RDAP History (`domain_age`)**
+   - Queries official RDAP (Registration Data Access Protocol) registries to determine exact registration date, domain age in days, expiration timeline, and registrar identity. Newly registered domains (< 30 days old) receive elevated suspicion points.
+4. **Stage 4 — Threat Intelligence & Public Web Reputation (`reputation`)**
+   - Evaluates domain reputation signals, phishing heuristics, and public user experience reports across the web.
+5. **Stage 5 — Redirect Chains & Destination Page Behavior (`redirects_page`)**
+   - Follows HTTP 301/302/307/308 redirects safely (with DNS-pinned SSRF protection blocking private/loopback IP ranges) and inspects the landing HTML for password fields, credit card inputs, seed phrase prompts, or mismatched brand titles.
+6. **Stage 6 — TLS/SSL X.509 Certificate Forensics (`certificate`)**
+   - Performs a live TLS handshake to inspect the X.509 leaf certificate issuer (e.g., Let's Encrypt DV vs. Organization/Extended Validation), subject alternative names (SANs), validity period, and protocol version. Educates users on the "HTTPS Padlock Fallacy" (over 80% of modern phishing sites use valid free DV TLS certificates).
+7. **Stage 7 — HTTP Security Posture & Infrastructure (`security_posture`)**
+   - Audits response headers (`Strict-Transport-Security`, `Content-Security-Policy`, `X-Frame-Options`, `X-Content-Type-Options`), mail exchange (`MX`) records, and SPF/DMARC (`TXT`) configurations that distinguish mature enterprise infrastructure from disposable phishing kits.
+8. **Stage 8 — Community Witness Reports (`witness`)**
+   - Cross-references the normalized hostname against verified community witness sightings (fake login prompts, UPI/crypto payment traps, SMS delivery scams, impersonation lures) with rate-limited, anti-brigading safeguards.
+
+---
+
+## 4. Deterministic 0–100 Suspicion Index & Risk Bands
+
+SHERLOCK never relies on unexplainable black-box numbers. Every point on the 0–100 Suspicion Index is backed by a named forensic rule:
+
+- **0 – 24: Low Suspicion (Likely Established Domain)**
+  - Long-standing domain registration, consistent brand identity, strong security headers, valid TLS, and zero impersonation triggers.
+- **25 – 54: Caution Warranted (Unusual or Unverified Signals)**
+  - Mixed signals such as a young domain, missing enterprise security headers, URL shortener obfuscation, or unverified merchant history.
+- **55 – 79: High Suspicion (Multiple Deceptive Indicators)**
+  - Strong indicators of brand mimicry, recent registration, suspicious subdomain nesting, or credential harvesting forms on an unrelated apex domain.
+- **80 – 100: Critical Threat (Likely Phishing or Scam Website)**
+  - Converging high-severity forensic evidence: typosquatted brand name, newly registered domain, deceptive login/payment lure, or confirmed community scam sightings.
+
+---
+
+## 5. Frequently Asked Questions (FAQ)
+
+### How can I check if a website link is safe or a phishing scam without opening it?
+Paste the link into SHERLOCK's Investigation Desk. SHERLOCK performs passive server-side DNS, RDAP WHOIS, TLS certificate, and SSRF-safe HTTP/HTML inspection without executing malicious scripts in your browser, returning a complete forensic dossier in seconds.
+
+### Does a green HTTPS padlock mean a website is legitimate?
+No. An HTTPS padlock only means the connection between your browser and the server is encrypted; it does not verify who owns the website. Phishing criminals routinely obtain free automated Domain-Validated (DV) TLS certificates for lookalike domains (such as `paypa1-security-check.com`). SHERLOCK inspects domain age, brand edit distance, RDAP registrar history, and DOM forms to expose padlock-protected scams.
+
+### What happens if I search a domain that does not exist?
+If a domain has no DNS A/AAAA/CNAME/NS/MX records (`NXDOMAIN` / `ENOTFOUND`), SHERLOCK halts artificial scoring, displays a verified **Website Does Not Exist** forensic notice, and provides direct links to **GoDaddy Domain Search** and **GoDaddy WHOIS** so you can verify whether the domain is unregistered or available.
+
+### How does SHERLOCK protect my privacy and security during an investigation?
+SHERLOCK enforces strict Content-Security-Policy (CSP), HTTP Strict Transport Security (HSTS), DNS-pinned Server-Side Request Forgery (SSRF) protection blocking RFC 1918/loopback/cloud-metadata IPs, sliding-window rate limiting, and zero storage of personal passwords or private credentials.

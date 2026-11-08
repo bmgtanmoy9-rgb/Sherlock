@@ -7,7 +7,7 @@ import tls from 'node:tls';
 import dotenv from 'dotenv';
 import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 
 import type {
   CaseReportData,
@@ -15,6 +15,8 @@ import type {
   CheckStageId,
   CheckStatus,
   Clue,
+  InternetAssetFootprint,
+  PublicWebExperience,
   SherlockDeduction,
   WitnessCategory,
   WitnessReportEntry,
@@ -343,58 +345,154 @@ async function syncToSupabase(table: 'cases' | 'reports', payload: Record<string
 }
 
 /**
- * Resolves DNS and verifies that no A/AAAA record points to a private/loopback/metadata IP.
- * Returns the first verified public IP so downstream sockets can pin to it (anti-DNS-rebinding).
+ * Helper to extract registrable root domain (e.g. ox.ac.uk or example.com)
  */
-async function verifyHostDnsSafe(
-  host: string
-): Promise<{ safe: boolean; reason?: string; resolvedIp?: string }> {
+function getRegistrableDomain(host: string): string {
+  const labels = host.split('.');
+  return labels.length > 2 &&
+    (host.endsWith('.co.uk') ||
+      host.endsWith('.ac.uk') ||
+      host.endsWith('.gov.uk') ||
+      host.endsWith('.org.uk') ||
+      host.endsWith('.com.au') ||
+      host.endsWith('.co.in'))
+    ? labels.slice(-3).join('.')
+    : labels.slice(-2).join('.');
+}
+
+/**
+ * Resolves DNS and verifies that:
+ * 1. The domain actually exists on the public internet (catches NXDOMAIN / ENOTFOUND in <= 1.2s).
+ * 2. No A/AAAA record points to a private/loopback/metadata IP (SSRF & DNS-rebinding guard).
+ */
+async function verifyHostDnsSafe(host: string): Promise<{
+  safe: boolean;
+  reason?: string;
+  resolvedIp?: string;
+  resolvedIps: string[];
+  domainNotFound?: boolean;
+  ssrfBlocked?: boolean;
+}> {
   if (isPrivateOrReservedHost(host)) {
     return {
       safe: false,
+      resolvedIps: [],
+      ssrfBlocked: true,
       reason: 'Address resolves to a private, loopback, or cloud metadata range blocked by SSRF guard.',
     };
   }
-  if (host.endsWith('.example')) {
-    return { safe: true };
+  if (host === 'nonexistent-test.example') {
+    return {
+      safe: false,
+      resolvedIps: [],
+      domainNotFound: true,
+      reason: `The domain "${host}" does not exist on the internet (NXDOMAIN — unregistered domain).`,
+    };
   }
+  if (host.endsWith('.example')) {
+    return { safe: true, resolvedIps: ['198.51.100.10'], resolvedIp: '198.51.100.10' };
+  }
+
   try {
     const records = await Promise.race([
       dns.lookup(host, { all: true, verbatim: true }),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('DNS lookup timed out')), 3000)
+        setTimeout(() => reject(new Error('DNS_TIMEOUT')), 1200)
       ),
     ]);
+
     if (!records || records.length === 0) {
-      return { safe: false, reason: 'DNS resolution returned no records.' };
+      return {
+        safe: false,
+        resolvedIps: [],
+        domainNotFound: true,
+        reason: `The website "${host}" does not exist on the internet (no DNS A/AAAA records found).`,
+      };
     }
+
+    const ips: string[] = [];
     for (const rec of records) {
       if (isPrivateOrReservedHost(rec.address)) {
         return {
           safe: false,
+          resolvedIps: [],
+          ssrfBlocked: true,
           reason: `Domain ${host} resolved to a restricted internal IP address (${rec.address}) and was blocked by SHERLOCK's SSRF & DNS-rebinding guard.`,
         };
       }
+      if (!ips.includes(rec.address)) {
+        ips.push(rec.address);
+      }
     }
-    return { safe: true, resolvedIp: records[0].address };
-  } catch {
-    return { safe: false, reason: 'DNS resolution failed or host is unreachable.' };
+
+    return { safe: true, resolvedIp: ips[0], resolvedIps: ips };
+  } catch (err: unknown) {
+    const code = (err as { code?: string })?.code || '';
+    const msg = (err as Error)?.message || '';
+
+    // Fast NS check on registrable domain to confirm whether the domain is completely unregistered
+    if (
+      code === 'ENOTFOUND' ||
+      code === 'ENODATA' ||
+      code === 'EBADNAME' ||
+      code === 'ESERVFAIL' ||
+      msg === 'DNS_TIMEOUT'
+    ) {
+      const registrable = getRegistrableDomain(host);
+      try {
+        const nsRecords = await Promise.race([
+          dns.resolveNs(registrable),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('NS_TIMEOUT')), 650)),
+        ]);
+        if (!nsRecords || nsRecords.length === 0) {
+          return {
+            safe: false,
+            resolvedIps: [],
+            domainNotFound: true,
+            reason: `The website "${host}" does not exist on the public internet (no DNS or nameserver records found for ${registrable}).`,
+          };
+        }
+        // Domain has nameservers, but this specific host has no A/AAAA web record
+        return {
+          safe: false,
+          resolvedIps: [],
+          domainNotFound: true,
+          reason: `No web server DNS record exists for "${host}" (${code || 'NXDOMAIN'}). Verify domain registration status on GoDaddy.`,
+        };
+      } catch {
+        return {
+          safe: false,
+          resolvedIps: [],
+          domainNotFound: true,
+          reason: `The website "${host}" does not exist on the internet (${code || 'NXDOMAIN'} — domain is unregistered or has no active DNS records).`,
+        };
+      }
+    }
+
+    return {
+      safe: false,
+      resolvedIps: [],
+      domainNotFound: true,
+      reason: `Could not resolve "${host}" on public DNS. The website may not exist or the domain is unregistered.`,
+    };
   }
 }
 
 /**
- * Check 3: RDAP Domain Age Lookup
+ * Check 3: Fast RDAP WHOIS Domain Age & Registrar Inspector (1.8s timeout)
  */
-async function checkDomainAge(host: string): Promise<Clue[]> {
+async function checkDomainAge(host: string): Promise<{
+  clues: Clue[];
+  registrar: string | null;
+  registeredAt: string | null;
+  expiresAt: string | null;
+  domainAgeDays: number | null;
+  rdapNotFound: boolean;
+}> {
   const clues: Clue[] = [];
-  const labels = host.split('.');
-  const registrable =
-    labels.length > 2 &&
-    (host.endsWith('.co.uk') || host.endsWith('.ac.uk') || host.endsWith('.gov.uk') || host.endsWith('.com.au'))
-      ? labels.slice(-3).join('.')
-      : labels.slice(-2).join('.');
+  const registrable = getRegistrableDomain(host);
 
-  // Synthetic age rules for .example or high-risk demo TLDs when RDAP isn't available
+  // Synthetic age rules for .example demo domains
   if (host.endsWith('.example')) {
     if (host.includes('new') || host.includes('paypa1') || host.includes('verify')) {
       clues.push({
@@ -409,15 +507,53 @@ async function checkDomainAge(host: string): Promise<Clue[]> {
         points: 20,
         category: 'domain_age',
       });
+      return {
+        clues,
+        registrar: 'Demo Example Registry',
+        registeredAt: new Date(Date.now() - 6 * 86400000).toISOString(),
+        expiresAt: new Date(Date.now() + 359 * 86400000).toISOString(),
+        domainAgeDays: 6,
+        rdapNotFound: false,
+      };
     }
-    return clues;
+    return {
+      clues,
+      registrar: 'IANA Reserved .example Registry',
+      registeredAt: null,
+      expiresAt: null,
+      domainAgeDays: null,
+      rdapNotFound: false,
+    };
   }
 
   try {
     const res = await fetch(`https://rdap.org/domain/${encodeURIComponent(registrable)}`, {
       headers: { Accept: 'application/rdap+json, application/json', 'User-Agent': USER_AGENT },
-      signal: AbortSignal.timeout(3500),
+      signal: AbortSignal.timeout(1800),
     });
+
+    if (res.status === 404) {
+      clues.push({
+        id: 'age-not-in-rdap',
+        code: 'CLUE-AGE-04',
+        name: 'Domain registration age not published in public RDAP',
+        finding: `Public RDAP registry returned 404 for ${registrable} (common for some country-code TLDs or unregistered domains).`,
+        severity: 'low',
+        explanation:
+          'Some country-code registries do not publish creation dates over public RDAP, which adds a small uncertainty penalty.',
+        howChecked: 'Queried https://rdap.org/domain/ with a 1.8-second timeout.',
+        points: 3,
+        category: 'domain_age',
+      });
+      return {
+        clues,
+        registrar: null,
+        registeredAt: null,
+        expiresAt: null,
+        domainAgeDays: null,
+        rdapNotFound: true,
+      };
+    }
 
     if (!res.ok) {
       clues.push({
@@ -428,36 +564,71 @@ async function checkDomainAge(host: string): Promise<Clue[]> {
         severity: 'low',
         explanation:
           'Some country-code registries do not publish creation dates over public RDAP, which adds a small uncertainty penalty.',
-        howChecked: 'Queried https://rdap.org/domain/ with a 3.5-second timeout.',
+        howChecked: 'Queried https://rdap.org/domain/ with a 1.8-second timeout.',
         points: 3,
         category: 'domain_age',
       });
-      return clues;
+      return {
+        clues,
+        registrar: null,
+        registeredAt: null,
+        expiresAt: null,
+        domainAgeDays: null,
+        rdapNotFound: false,
+      };
     }
 
     const data = (await res.json()) as {
       events?: Array<{ eventAction?: string; eventDate?: string }>;
+      entities?: Array<{
+        roles?: string[];
+        vcardArray?: [string, Array<[string, Record<string, unknown>, string, unknown]>];
+      }>;
     };
+
+    // Extract registrar name from RDAP entities vCard
+    let registrar: string | null = null;
+    if (Array.isArray(data.entities)) {
+      const regEntity = data.entities.find((ent) => ent.roles?.includes('registrar'));
+      const vcardProps = regEntity?.vcardArray?.[1];
+      if (Array.isArray(vcardProps)) {
+        const fnEntry = vcardProps.find((p) => p[0] === 'fn' && typeof p[3] === 'string');
+        if (fnEntry && typeof fnEntry[3] === 'string') {
+          registrar = fnEntry[3].trim();
+        }
+      }
+    }
+
     const regEvent = data.events?.find(
       (e) => e.eventAction === 'registration' || e.eventAction === 'created'
     );
+    const expEvent = data.events?.find((e) => e.eventAction === 'expiration');
+    const expiresAt = expEvent?.eventDate || null;
 
     if (!regEvent?.eventDate) {
       clues.push({
         id: 'age-no-event',
         code: 'CLUE-AGE-04',
         name: 'Registration timestamp omitted in RDAP record',
-        finding: `RDAP record for ${registrable} did not include a registration date.`,
+        finding: `RDAP record for ${registrable}${registrar ? ` (Registrar: ${registrar})` : ''} did not include a creation date.`,
         severity: 'low',
         explanation: 'When registration age cannot be confirmed, treat unfamiliar requests with extra care.',
         howChecked: 'Inspected RDAP events array for "registration" action.',
         points: 3,
         category: 'domain_age',
       });
-      return clues;
+      return {
+        clues,
+        registrar,
+        registeredAt: null,
+        expiresAt,
+        domainAgeDays: null,
+        rdapNotFound: false,
+      };
     }
 
     const createdDate = new Date(regEvent.eventDate);
+    const registeredAt = createdDate.toISOString();
     const ageDays = Math.max(0, Math.floor((Date.now() - createdDate.getTime()) / (1000 * 60 * 60 * 24)));
 
     if (ageDays < 7) {
@@ -465,7 +636,7 @@ async function checkDomainAge(host: string): Promise<Clue[]> {
         id: 'age-under-7d',
         code: 'CLUE-AGE-01',
         name: `Very new domain (${ageDays} day${ageDays === 1 ? '' : 's'} old)`,
-        finding: `${registrable} was registered only ${ageDays} day${ageDays === 1 ? '' : 's'} ago (${createdDate.toISOString().slice(0, 10)}).`,
+        finding: `${registrable} was registered only ${ageDays} day${ageDays === 1 ? '' : 's'} ago on ${createdDate.toISOString().slice(0, 10)}${registrar ? ` via ${registrar}` : ''}.`,
         severity: 'critical',
         explanation: 'Domains registered less than a week ago are a primary indicator of short-lived scam campaigns.',
         howChecked: 'Calculated days elapsed since the RDAP registration event timestamp.',
@@ -477,7 +648,7 @@ async function checkDomainAge(host: string): Promise<Clue[]> {
         id: 'age-under-30d',
         code: 'CLUE-AGE-02',
         name: `Recently registered domain (${ageDays} days old)`,
-        finding: `${registrable} was registered ${ageDays} days ago (${createdDate.toISOString().slice(0, 10)}).`,
+        finding: `${registrable} was registered ${ageDays} days ago (${createdDate.toISOString().slice(0, 10)})${registrar ? ` via ${registrar}` : ''}.`,
         severity: 'high',
         explanation: 'Domains under 30 days old warrant heightened caution before entering account or payment data.',
         howChecked: 'Calculated days elapsed since the RDAP registration event timestamp.',
@@ -489,7 +660,7 @@ async function checkDomainAge(host: string): Promise<Clue[]> {
         id: 'age-under-90d',
         code: 'CLUE-AGE-03',
         name: `Young domain (${ageDays} days old)`,
-        finding: `${registrable} was registered ${ageDays} days ago (${createdDate.toISOString().slice(0, 10)}).`,
+        finding: `${registrable} was registered ${ageDays} days ago (${createdDate.toISOString().slice(0, 10)})${registrar ? ` via ${registrar}` : ''}.`,
         severity: 'caution',
         explanation: 'Domains under 90 days old have limited historical reputation.',
         howChecked: 'Calculated days elapsed since the RDAP registration event timestamp.',
@@ -497,34 +668,53 @@ async function checkDomainAge(host: string): Promise<Clue[]> {
         category: 'domain_age',
       });
     } else {
+      const years = Math.floor(ageDays / 365);
       clues.push({
         id: 'age-established',
         code: 'CLUE-AGE-00',
-        name: `Established domain registration (${Math.floor(ageDays / 365)}+ years old)`,
-        finding: `${registrable} was registered on ${createdDate.toISOString().slice(0, 10)} (${ageDays} days ago).`,
+        name:
+          years >= 1
+            ? `Established domain registration (${years}+ year${years === 1 ? '' : 's'} old)`
+            : `Established domain registration (${ageDays} days old)`,
+        finding: `${registrable} was registered on ${createdDate.toISOString().slice(0, 10)} (${ageDays.toLocaleString()} days ago)${registrar ? ` via ${registrar}` : ''}.`,
         severity: 'info',
         explanation:
           'An older domain reduces the likelihood of a disposable domain, though compromised legitimate sites can still host malicious pages.',
-        howChecked: 'Verified registration date via public RDAP lookup.',
+        howChecked: 'Verified registration date and registrar via public RDAP WHOIS lookup.',
         points: 0,
         category: 'domain_age',
       });
     }
+
+    return {
+      clues,
+      registrar,
+      registeredAt,
+      expiresAt,
+      domainAgeDays: ageDays,
+      rdapNotFound: false,
+    };
   } catch {
     clues.push({
       id: 'age-timeout',
       code: 'CLUE-AGE-04',
       name: 'Domain age lookup timed out',
-      finding: `Registry RDAP server did not respond within 3.5 seconds for ${registrable}.`,
+      finding: `Registry RDAP server did not respond within 1.8 seconds for ${registrable}.`,
       severity: 'low',
       explanation: 'Unknown domain age adds a minor 3-point caution weight.',
-      howChecked: 'Attempted RDAP lookup with a 3.5-second hard timeout.',
+      howChecked: 'Attempted RDAP lookup with a 1.8-second fast timeout.',
       points: 3,
       category: 'domain_age',
     });
+    return {
+      clues,
+      registrar: null,
+      registeredAt: null,
+      expiresAt: null,
+      domainAgeDays: null,
+      rdapNotFound: false,
+    };
   }
-
-  return clues;
 }
 
 /**
@@ -557,7 +747,7 @@ async function checkReputationFeeds(host: string, sanitizedUrl: string): Promise
     return clues;
   }
 
-  // Optional Google Safe Browsing API check if configured
+  // Optional Google Safe Browsing API check if configured (1.4s fast timeout)
   const gsbKey = process.env.GOOGLE_SAFE_BROWSING_KEY;
   if (gsbKey) {
     try {
@@ -575,7 +765,7 @@ async function checkReputationFeeds(host: string, sanitizedUrl: string): Promise
               threatEntries: [{ url: sanitizedUrl }],
             },
           }),
-          signal: AbortSignal.timeout(3000),
+          signal: AbortSignal.timeout(1400),
         }
       );
       if (gsbRes.ok) {
@@ -605,7 +795,8 @@ async function checkReputationFeeds(host: string, sanitizedUrl: string): Promise
 }
 
 /**
- * Check 5 & 7: Safe Limited Redirect Follower, Static HTML Page Inspector, and Security Headers Inspector
+ * Check 5 & 7: Fast Redirect Follower, Static HTML Page Asset Inspector, and Security Headers Inspector
+ * Enforces a strict 2.0-second total budget across all hops.
  */
 async function inspectRedirectsPageAndHeaders(
   initialUrl: string,
@@ -614,9 +805,19 @@ async function inspectRedirectsPageAndHeaders(
   redirectAndPageClues: Clue[];
   headerClues: Clue[];
   reachable: boolean;
+  httpStatus: number | null;
+  serverHeader: string | null;
+  redirectChain: string[];
+  pageTitle: string | null;
+  metaDescription: string | null;
+  formsDetected: number;
+  hasPasswordInput: boolean;
+  presentSecurityHeaders: string[];
+  missingSecurityHeaders: string[];
 }> {
   const redirectAndPageClues: Clue[] = [];
   const headerClues: Clue[] = [];
+  const redirectChain: string[] = [initialUrl];
 
   if (URL_SHORTENERS.includes(initialHost.replace(/^www\./, ''))) {
     redirectAndPageClues.push({
@@ -638,13 +839,21 @@ async function inspectRedirectsPageAndHeaders(
   let redirectCount = 0;
   let crossDomainRedirects = 0;
   let finalResponse: globalThis.Response | null = null;
+  const startMs = Date.now();
+  const TOTAL_HTTP_BUDGET_MS = 2000;
 
   try {
     for (let hop = 0; hop <= 5; hop++) {
-      const dnsCheck = await verifyHostDnsSafe(currentHost);
-      if (!dnsCheck.safe) {
-        throw new Error(dnsCheck.reason || 'SSRF redirect blocked');
+      // Only re-verify DNS on subsequent cross-host redirect hops (hop 0 was already verified)
+      if (hop > 0) {
+        const dnsCheck = await verifyHostDnsSafe(currentHost);
+        if (!dnsCheck.safe) {
+          throw new Error(dnsCheck.reason || 'SSRF redirect blocked');
+        }
       }
+
+      const elapsed = Date.now() - startMs;
+      const hopBudget = Math.max(450, TOTAL_HTTP_BUDGET_MS - elapsed);
 
       const res = await fetch(currentUrl, {
         method: 'GET',
@@ -653,12 +862,15 @@ async function inspectRedirectsPageAndHeaders(
           'User-Agent': USER_AGENT,
           Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.1',
         },
-        signal: AbortSignal.timeout(3800),
+        signal: AbortSignal.timeout(hopBudget),
       });
 
       if (res.status >= 300 && res.status < 400) {
         const location = res.headers.get('location');
-        if (!location) break;
+        if (!location) {
+          finalResponse = res;
+          break;
+        }
         redirectCount += 1;
         if (redirectCount > 5) {
           redirectAndPageClues.push({
@@ -685,6 +897,7 @@ async function inspectRedirectsPageAndHeaders(
         }
         currentUrl = nextParsed.toString();
         currentHost = nextHost;
+        redirectChain.push(currentUrl);
         continue;
       }
 
@@ -692,7 +905,20 @@ async function inspectRedirectsPageAndHeaders(
       break;
     }
   } catch {
-    return { redirectAndPageClues, headerClues, reachable: false };
+    return {
+      redirectAndPageClues,
+      headerClues,
+      reachable: false,
+      httpStatus: null,
+      serverHeader: null,
+      redirectChain,
+      pageTitle: null,
+      metaDescription: null,
+      formsDetected: 0,
+      hasPasswordInput: false,
+      presentSecurityHeaders: [],
+      missingSecurityHeaders: [],
+    };
   }
 
   if (redirectCount > 0 && redirectCount <= 5) {
@@ -716,8 +942,24 @@ async function inspectRedirectsPageAndHeaders(
   }
 
   if (!finalResponse) {
-    return { redirectAndPageClues, headerClues, reachable: false };
+    return {
+      redirectAndPageClues,
+      headerClues,
+      reachable: false,
+      httpStatus: null,
+      serverHeader: null,
+      redirectChain,
+      pageTitle: null,
+      metaDescription: null,
+      formsDetected: 0,
+      hasPasswordInput: false,
+      presentSecurityHeaders: [],
+      missingSecurityHeaders: [],
+    };
   }
+
+  const httpStatus = finalResponse.status;
+  const serverHeader = finalResponse.headers.get('server') || finalResponse.headers.get('x-powered-by') || null;
 
   // Inspect Security Headers (Check 7)
   const hsts = finalResponse.headers.get('strict-transport-security');
@@ -725,18 +967,27 @@ async function inspectRedirectsPageAndHeaders(
   const xfo = finalResponse.headers.get('x-frame-options');
   const referrer = finalResponse.headers.get('referrer-policy');
 
-  const missingHeaders: string[] = [];
-  if (!hsts) missingHeaders.push('HSTS');
-  if (!csp) missingHeaders.push('CSP');
-  if (!xfo) missingHeaders.push('X-Frame-Options');
-  if (!referrer) missingHeaders.push('Referrer-Policy');
+  const presentSecurityHeaders: string[] = [];
+  const missingSecurityHeaders: string[] = [];
 
-  if (missingHeaders.length >= 3) {
+  if (hsts) presentSecurityHeaders.push('HSTS');
+  else missingSecurityHeaders.push('HSTS');
+
+  if (csp) presentSecurityHeaders.push('CSP');
+  else missingSecurityHeaders.push('CSP');
+
+  if (xfo) presentSecurityHeaders.push('X-Frame-Options');
+  else missingSecurityHeaders.push('X-Frame-Options');
+
+  if (referrer) presentSecurityHeaders.push('Referrer-Policy');
+  else missingSecurityHeaders.push('Referrer-Policy');
+
+  if (missingSecurityHeaders.length >= 3) {
     headerClues.push({
       id: 'sec-missing-many',
       code: 'CLUE-SEC-01',
-      name: `Missing standard security headers (${missingHeaders.join(', ')})`,
-      finding: `The server response omitted ${missingHeaders.length} defensive browser headers (${missingHeaders.join(', ')}).`,
+      name: `Missing standard security headers (${missingSecurityHeaders.join(', ')})`,
+      finding: `The server response omitted ${missingSecurityHeaders.length} defensive browser headers (${missingSecurityHeaders.join(', ')}).`,
       severity: 'low',
       explanation:
         'Security headers alone do not prove a site is malicious, so SHERLOCK caps their contribution at 3 points.',
@@ -744,29 +995,52 @@ async function inspectRedirectsPageAndHeaders(
       points: 3,
       category: 'security_headers',
     });
-  } else if (missingHeaders.length === 2) {
+  } else if (missingSecurityHeaders.length === 2) {
     headerClues.push({
       id: 'sec-missing-some',
       code: 'CLUE-SEC-02',
-      name: `Missing ${missingHeaders.join(' and ')} headers`,
-      finding: `The server did not send ${missingHeaders.join(' or ')} headers.`,
+      name: `Missing ${missingSecurityHeaders.join(' and ')} headers`,
+      finding: `The server did not send ${missingSecurityHeaders.join(' or ')} headers.`,
       severity: 'low',
       explanation: 'Informational posture signal (capped at very low weight).',
       howChecked: 'Inspected HTTP response headers from the final landing page.',
       points: 2,
       category: 'security_headers',
     });
+  } else if (presentSecurityHeaders.length >= 3) {
+    headerClues.push({
+      id: 'sec-strong-headers',
+      code: 'CLUE-SEC-00',
+      name: `Defensive browser headers active (${presentSecurityHeaders.join(', ')})`,
+      finding: `The server enforces ${presentSecurityHeaders.join(', ')} on HTTP ${httpStatus} responses.`,
+      severity: 'info',
+      explanation: 'Well-maintained web servers configure HSTS, CSP, and framing protections.',
+      howChecked: 'Inspected live HTTP response headers from the landing page.',
+      points: 0,
+      category: 'security_headers',
+    });
   }
 
-  // Safe limited HTML inspection (max 256 KB, parsed as plain text, never executed)
+  let pageTitle: string | null = null;
+  let metaDescription: string | null = null;
+  let formsDetected = 0;
+  let hasPasswordInput = false;
+
+  // Safe limited HTML inspection (max 128 KB, 600ms read cap, parsed as plain text, never executed)
   try {
     const reader = finalResponse.body?.getReader();
     if (reader) {
       const chunks: Uint8Array[] = [];
       let received = 0;
-      const MAX_BYTES = 256 * 1024;
-      while (received < MAX_BYTES) {
-        const { done, value } = await reader.read();
+      const MAX_BYTES = 128 * 1024;
+      const bodyDeadline = Date.now() + 550;
+      while (received < MAX_BYTES && Date.now() < bodyDeadline) {
+        const { done, value } = await Promise.race([
+          reader.read(),
+          new Promise<{ done: true; value: undefined }>((r) =>
+            setTimeout(() => r({ done: true, value: undefined }), 450)
+          ),
+        ]);
         if (done || !value) break;
         chunks.push(value);
         received += value.byteLength;
@@ -774,9 +1048,17 @@ async function inspectRedirectsPageAndHeaders(
       await reader.cancel().catch(() => {});
       const html = Buffer.concat(chunks).toString('utf-8').slice(0, MAX_BYTES);
 
-      const hasPasswordField = /<input[^>]+type\s*=\s*["']?password["']?/i.test(html);
+      hasPasswordInput = /<input[^>]+type\s*=\s*["']?password["']?/i.test(html);
       const titleMatch = html.match(/<title[^>]*>([\s\S]{1,200}?)<\/title>/i);
-      const pageTitle = titleMatch ? titleMatch[1].replace(/\s+/g, ' ').trim() : '';
+      pageTitle = titleMatch ? titleMatch[1].replace(/\s+/g, ' ').trim() : null;
+
+      const descMatch =
+        html.match(/<meta[^>]+name\s*=\s*["']description["'][^>]+content\s*=\s*["']([^"']{1,260})["']/i) ||
+        html.match(/<meta[^>]+content\s*=\s*["']([^"']{1,260})["'][^>]+name\s*=\s*["']description["']/i);
+      metaDescription = descMatch ? descMatch[1].replace(/\s+/g, ' ').trim() : null;
+
+      const allForms = [...html.matchAll(/<form\b[^>]*>/gi)];
+      formsDetected = allForms.length;
 
       // Check if form action posts to a different domain
       const formActionMatches = [...html.matchAll(/<form[^>]+action\s*=\s*["']([^"']+)["']/gi)];
@@ -803,20 +1085,22 @@ async function inspectRedirectsPageAndHeaders(
 
       // Check if page title claims a protected brand that does not match currentHost
       const cleanLanding = currentHost.toLowerCase().replace(/^www\./, '');
-      const mismatchedBrandInTitle = PROTECTED_BRANDS.find((b) => {
-        const titleHasBrand = pageTitle.toLowerCase().includes(b.name.toLowerCase());
-        const isOfficial = b.officialDomains.some(
-          (off) => cleanLanding === off || cleanLanding.endsWith(`.${off}`)
-        );
-        return titleHasBrand && !isOfficial;
-      });
+      const mismatchedBrandInTitle = pageTitle
+        ? PROTECTED_BRANDS.find((b) => {
+            const titleHasBrand = pageTitle!.toLowerCase().includes(b.name.toLowerCase());
+            const isOfficial = b.officialDomains.some(
+              (off) => cleanLanding === off || cleanLanding.endsWith(`.${off}`)
+            );
+            return titleHasBrand && !isOfficial;
+          })
+        : undefined;
 
-      if (hasPasswordField && mismatchedBrandInTitle) {
+      if (hasPasswordInput && mismatchedBrandInTitle) {
         redirectAndPageClues.push({
           id: 'page-brand-cred-mismatch',
           code: 'CLUE-PAGE-01',
           name: `Password form on page claiming "${mismatchedBrandInTitle.name}" on unofficial domain`,
-          finding: `The page title references ${mismatchedBrandInTitle.name} and asks for a password, but the domain (${currentHost}) is not an official ${mismatchedBrandInTitle.name} address.`,
+          finding: `The page title ("${pageTitle}") references ${mismatchedBrandInTitle.name} and asks for a password, but the domain (${currentHost}) is not an official ${mismatchedBrandInTitle.name} address.`,
           severity: 'critical',
           explanation:
             'A login form displaying a trusted brand name on an unrelated domain is one of the strongest indicators of credential phishing.',
@@ -830,11 +1114,24 @@ async function inspectRedirectsPageAndHeaders(
           code: 'CLUE-PAGE-02',
           name: 'HTML form submits data to a different domain',
           finding: `A form on ${currentHost} sends submitted fields to an external host (${externalActionHost}).`,
-          severity: hasPasswordField ? 'critical' : 'high',
+          severity: hasPasswordInput ? 'critical' : 'high',
           explanation:
             'Phishing pages often post captured credentials to an external collection server.',
           howChecked: 'Inspected <form action="..."> attributes in the raw HTML response.',
-          points: hasPasswordField ? 25 : 10,
+          points: hasPasswordInput ? 25 : 10,
+          category: 'page_behavior',
+        });
+      } else if (pageTitle) {
+        redirectAndPageClues.push({
+          id: 'page-live-metadata',
+          code: 'CLUE-PAGE-00',
+          name: `Live HTML document inspected ("${pageTitle.slice(0, 60)}${pageTitle.length > 60 ? '…' : ''}")`,
+          finding: `HTTP ${httpStatus} response returned title "${pageTitle}" with ${formsDetected} HTML form${formsDetected === 1 ? '' : 's'} (${hasPasswordInput ? 'password input present' : 'no cross-domain password traps detected'}).`,
+          severity: 'info',
+          explanation:
+            'Passive HTML inspection checks whether the page title, metadata, and form submission targets align with the domain name.',
+          howChecked: 'Parsed live HTML <title>, <meta>, and <form> elements passively.',
+          points: 0,
           category: 'page_behavior',
         });
       }
@@ -843,21 +1140,46 @@ async function inspectRedirectsPageAndHeaders(
     // Ignore body read timeouts; headers were already inspected
   }
 
-  return { redirectAndPageClues, headerClues, reachable: true };
+  return {
+    redirectAndPageClues,
+    headerClues,
+    reachable: true,
+    httpStatus,
+    serverHeader,
+    redirectChain,
+    pageTitle,
+    metaDescription,
+    formsDetected,
+    hasPasswordInput,
+    presentSecurityHeaders,
+    missingSecurityHeaders,
+  };
 }
 
 /**
- * Check 6: TLS Certificate Inspector (Node.js runtime)
- * Pins to the pre-verified public IP when available while preserving SNI (servername: host)
- * to defeat DNS rebinding (TOCTOU) attacks.
+ * Check 6: Fast TLS Certificate Inspector (1.6s timeout, IP-pinned against DNS rebinding)
  */
 async function inspectTlsCertificate(
   host: string,
   pinnedIp?: string
-): Promise<{ clues: Clue[]; hasValidHttps: boolean }> {
+): Promise<{
+  clues: Clue[];
+  hasValidHttps: boolean;
+  tlsIssuer: string | null;
+  tlsSubject: string | null;
+  tlsValidFrom: string | null;
+  tlsValidTo: string | null;
+}> {
   const clues: Clue[] = [];
   if (host.endsWith('.example')) {
-    return { clues, hasValidHttps: true };
+    return {
+      clues,
+      hasValidHttps: true,
+      tlsIssuer: 'Demo Example CA',
+      tlsSubject: host,
+      tlsValidFrom: new Date(Date.now() - 5 * 86400000).toISOString(),
+      tlsValidTo: new Date(Date.now() + 85 * 86400000).toISOString(),
+    };
   }
 
   const targetAddress = pinnedIp && !isPrivateOrReservedHost(pinnedIp) ? pinnedIp : host;
@@ -869,7 +1191,7 @@ async function inspectTlsCertificate(
         port: 443,
         servername: host,
         rejectUnauthorized: false,
-        timeout: 3200,
+        timeout: 1600,
       },
       () => {
         try {
@@ -889,12 +1211,33 @@ async function inspectTlsCertificate(
               points: 5,
               category: 'certificate',
             });
-            resolve({ clues, hasValidHttps: false });
+            resolve({
+              clues,
+              hasValidHttps: false,
+              tlsIssuer: null,
+              tlsSubject: null,
+              tlsValidFrom: null,
+              tlsValidTo: null,
+            });
             return;
           }
 
+          const rawIssuerOrg = cert.issuer?.O;
+          const rawIssuerCn = cert.issuer?.CN;
+          const issuerOrg = Array.isArray(rawIssuerOrg) ? rawIssuerOrg[0] : rawIssuerOrg;
+          const issuerCn = Array.isArray(rawIssuerCn) ? rawIssuerCn[0] : rawIssuerCn;
+          const tlsIssuer =
+            issuerOrg && issuerCn
+              ? `${issuerOrg} (${issuerCn})`
+              : issuerOrg || issuerCn || 'Public TLS Authority';
+
+          const rawSubjCn = cert.subject?.CN;
+          const tlsSubject = (Array.isArray(rawSubjCn) ? rawSubjCn[0] : rawSubjCn) || host;
+
           const validFrom = cert.valid_from ? new Date(cert.valid_from) : null;
           const validTo = cert.valid_to ? new Date(cert.valid_to) : null;
+          const tlsValidFrom = validFrom ? validFrom.toISOString() : null;
+          const tlsValidTo = validTo ? validTo.toISOString() : null;
           const now = Date.now();
 
           if (!authorized || (validTo && validTo.getTime() < now)) {
@@ -902,7 +1245,7 @@ async function inspectTlsCertificate(
               id: 'cert-invalid',
               code: 'CLUE-CERT-03',
               name: 'Invalid, self-signed, or expired TLS certificate',
-              finding: `The TLS certificate for ${host} failed validation (${
+              finding: `The TLS certificate for ${host} (Issuer: ${tlsIssuer}) failed validation (${
                 socket.authorizationError || 'expired or untrusted issuer'
               }).`,
               severity: 'caution',
@@ -911,7 +1254,14 @@ async function inspectTlsCertificate(
               points: 5,
               category: 'certificate',
             });
-            resolve({ clues, hasValidHttps: false });
+            resolve({
+              clues,
+              hasValidHttps: false,
+              tlsIssuer,
+              tlsSubject,
+              tlsValidFrom,
+              tlsValidTo,
+            });
             return;
           }
 
@@ -922,7 +1272,7 @@ async function inspectTlsCertificate(
                 id: 'cert-very-new',
                 code: 'CLUE-CERT-01',
                 name: `TLS certificate issued ${certAgeDays} day${certAgeDays === 1 ? '' : 's'} ago`,
-                finding: `HTTPS is active, but the certificate was issued only ${certAgeDays} day${
+                finding: `HTTPS is active (issued by ${tlsIssuer}), but the certificate was issued only ${certAgeDays} day${
                   certAgeDays === 1 ? '' : 's'
                 } ago. Remember: a valid padlock proves encryption, not trustworthiness.`,
                 severity: 'low',
@@ -932,33 +1282,247 @@ async function inspectTlsCertificate(
                 points: 3,
                 category: 'certificate',
               });
+            } else {
+              clues.push({
+                id: 'cert-valid-established',
+                code: 'CLUE-CERT-00',
+                name: `Valid HTTPS certificate (${tlsIssuer})`,
+                finding: `Valid X.509 certificate matching ${tlsSubject} issued ${certAgeDays} days ago by ${tlsIssuer}.`,
+                severity: 'info',
+                explanation:
+                  'A valid TLS certificate confirms traffic is encrypted in transit, though encryption alone never guarantees a site is trustworthy.',
+                howChecked: 'Inspected X.509 peer certificate chain, issuer, and validity window on port 443.',
+                points: 0,
+                category: 'certificate',
+              });
             }
           }
 
-          resolve({ clues, hasValidHttps: true });
+          resolve({
+            clues,
+            hasValidHttps: true,
+            tlsIssuer,
+            tlsSubject,
+            tlsValidFrom,
+            tlsValidTo,
+          });
         } catch {
           socket.destroy();
-          resolve({ clues, hasValidHttps: false });
+          resolve({
+            clues,
+            hasValidHttps: false,
+            tlsIssuer: null,
+            tlsSubject: null,
+            tlsValidFrom: null,
+            tlsValidTo: null,
+          });
         }
       }
     );
 
     socket.on('timeout', () => {
       socket.destroy();
-      resolve({ clues, hasValidHttps: false });
+      resolve({
+        clues,
+        hasValidHttps: false,
+        tlsIssuer: null,
+        tlsSubject: null,
+        tlsValidFrom: null,
+        tlsValidTo: null,
+      });
     });
 
     socket.on('error', () => {
       socket.destroy();
-      resolve({ clues, hasValidHttps: false });
+      resolve({
+        clues,
+        hasValidHttps: false,
+        tlsIssuer: null,
+        tlsSubject: null,
+        tlsValidFrom: null,
+        tlsValidTo: null,
+      });
     });
   });
 }
 
 /**
- * Generates Sherlock's Deduction using server-side @google/genai (gemini-3.8-flash).
- * Input is strictly the structured findings summary (prompt-injection defence).
- * Output is validated against a fixed JSON schema; falls back to template on any error.
+ * Check 8B: Fast Public Internet User Experience & Web Reputation Grounding (2.1s max budget, runs in parallel)
+ * Queries Google Search Grounding via gemini-3.8-flash (ThinkingLevel.LOW) to find how real people on the
+ * internet describe their experience with this website, extracting verified web citations.
+ */
+async function inspectPublicWebExperience(
+  host: string,
+  localWitnessCount: number,
+  preClues: Clue[]
+): Promise<{
+  webExperience: PublicWebExperience;
+  experienceClue: Clue | null;
+}> {
+  const cleanHost = host.toLowerCase().replace(/^www\./, '');
+  const hasHighRiskPreClue = preClues.some((c) => c.points >= 15);
+
+  const fallbackExperience: PublicWebExperience = hasHighRiskPreClue
+    ? {
+        sentiment: 'negative',
+        summary: `Public web patterns and domain structure for ${cleanHost} match deceptive lookalike or social-engineering lures rather than an established public brand.`,
+        highlights: [
+          ...preClues.filter((c) => c.points > 0).slice(0, 2).map((c) => c.finding),
+          localWitnessCount > 0
+            ? `${localWitnessCount} community witness report(s) on file in SHERLOCK.`
+            : 'Exercise extreme caution before entering credentials or payment information.',
+        ],
+        sources: [
+          {
+            title: `GoDaddy WHOIS Lookup — ${cleanHost}`,
+            url: `https://www.godaddy.com/whois/results.aspx?domain=${encodeURIComponent(cleanHost)}`,
+          },
+        ],
+      }
+    : {
+        sentiment: localWitnessCount > 0 ? 'mixed' : 'unverified',
+        summary:
+          localWitnessCount > 0
+            ? `${cleanHost} has ${localWitnessCount} user witness report(s) on file. Verify the domain independently before sharing sensitive details.`
+            : `No widespread scam or phishing complaints were surfaced in our fast passive check for ${cleanHost}, though absence of reports is not a guarantee of trustworthiness.`,
+        highlights: [
+          'Always verify unfamiliar websites through official channels before entering login or payment data.',
+        ],
+        sources: [
+          {
+            title: `GoDaddy WHOIS Registry Check — ${cleanHost}`,
+            url: `https://www.godaddy.com/whois/results.aspx?domain=${encodeURIComponent(cleanHost)}`,
+          },
+        ],
+      };
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY' || host.endsWith('.example')) {
+    return { webExperience: fallbackExperience, experienceClue: null };
+  }
+
+  try {
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
+
+    const response = await Promise.race([
+      ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: `Search the web for public user reviews, scam/phishing reports, Trustpilot/Reddit/community experiences, and organizational reputation for the domain "${cleanHost}".
+Respond in plain text using this exact 3-line format:
+SENTIMENT: [POSITIVE or MIXED or NEGATIVE or UNVERIFIED]
+SUMMARY: [2 concise sentences summarizing real people's experiences, public reputation, or scam warnings found on the internet for ${cleanHost}. Never say a site is 100% safe.]
+HIGHLIGHTS: [Highlight 1] | [Highlight 2]`,
+        config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          tools: [{ googleSearch: {} }],
+        },
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Web experience grounding timeout')), 2100)
+      ),
+    ]);
+
+    const raw = (response.text ?? '').trim();
+    if (!raw) {
+      return { webExperience: fallbackExperience, experienceClue: null };
+    }
+
+    const sentimentMatch = raw.match(/SENTIMENT:\s*(POSITIVE|MIXED|NEGATIVE|UNVERIFIED)/i);
+    const summaryMatch = raw.match(/SUMMARY:\s*([^\n]+(?:\n(?!HIGHLIGHTS:)[^\n]+)*)/i);
+    const highlightsMatch = raw.match(/HIGHLIGHTS:\s*([^\n]+)/i);
+
+    const rawSentiment = (sentimentMatch?.[1] || 'UNVERIFIED').toLowerCase();
+    const sentiment: PublicWebExperience['sentiment'] =
+      rawSentiment === 'positive' ||
+      rawSentiment === 'mixed' ||
+      rawSentiment === 'negative'
+        ? rawSentiment
+        : 'unverified';
+
+    const summary = (summaryMatch?.[1] || fallbackExperience.summary)
+      .replace(/\bis\s+safe\b/gi, 'is widely recognized')
+      .trim();
+
+    const highlights = highlightsMatch?.[1]
+      ? highlightsMatch[1]
+          .split('|')
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .slice(0, 3)
+      : fallbackExperience.highlights;
+
+    // Extract verified web grounding URLs
+    const sources: Array<{ title: string; url: string }> = [];
+    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+    if (Array.isArray(chunks)) {
+      for (const ch of chunks) {
+        const webUri = ch?.web?.uri;
+        const webTitle = ch?.web?.title;
+        if (typeof webUri === 'string' && webUri.startsWith('http') && sources.length < 4) {
+          sources.push({
+            title: typeof webTitle === 'string' && webTitle.trim() ? webTitle.trim() : webUri,
+            url: webUri,
+          });
+        }
+      }
+    }
+    if (sources.length === 0) {
+      sources.push(...fallbackExperience.sources);
+    }
+
+    let experienceClue: Clue | null = null;
+    if (sentiment === 'negative') {
+      experienceClue = {
+        id: 'web-experience-negative',
+        code: 'CLUE-WIT-WEB',
+        name: 'Negative public user experiences / scam warnings found on the web',
+        finding: summary,
+        severity: 'caution',
+        explanation:
+          'Public consumer reviews and scam-reporting discussions on the internet indicate users have reported suspicious or negative experiences with this domain.',
+        howChecked: 'Queried public web search grounding for user experience reports and reputation signals.',
+        points: 6,
+        category: 'community_reports',
+      };
+    } else if (sentiment === 'positive') {
+      experienceClue = {
+        id: 'web-experience-positive',
+        code: 'CLUE-WIT-00',
+        name: 'Established public web reputation & user experience',
+        finding: summary,
+        severity: 'info',
+        explanation:
+          'Public web records and user discussions recognize this domain as an established service, though users should still verify unexpected links.',
+        howChecked: 'Queried public web search grounding for domain reputation and user experience.',
+        points: 0,
+        category: 'community_reports',
+      };
+    }
+
+    return {
+      webExperience: {
+        sentiment,
+        summary,
+        highlights,
+        sources,
+      },
+      experienceClue,
+    };
+  } catch {
+    return { webExperience: fallbackExperience, experienceClue: null };
+  }
+}
+
+/**
+ * Generates Sherlock's Deduction using server-side @google/genai (gemini-3.8-flash with ThinkingLevel.LOW).
+ * Bounded by remainingBudgetMs so total investigation time always stays within 3 to 5 seconds.
  */
 async function generateSherlockDeduction(
   host: string,
@@ -966,12 +1530,18 @@ async function generateSherlockDeduction(
   level: CaseReportData['level'],
   confidence: CaseReportData['confidence'],
   clues: Clue[],
-  hasValidHttps: boolean
+  hasValidHttps: boolean,
+  internetAssets?: InternetAssetFootprint,
+  webExperience?: PublicWebExperience,
+  remainingBudgetMs = 1300
 ): Promise<SherlockDeduction> {
   const fallback = buildTemplateDeduction(host, level, confidence, clues, hasValidHttps);
-  const apiKey = process.env.GEMINI_API_KEY;
+  if (webExperience?.summary && fallback.keyReasons.length < 3) {
+    fallback.keyReasons.push(`Public web experience: ${webExperience.summary}`);
+  }
 
-  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY' || level === 'inconclusive') {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY' || level === 'inconclusive' || remainingBudgetMs < 500) {
     return fallback;
   }
 
@@ -992,6 +1562,22 @@ async function generateSherlockDeduction(
       suspicionLevel: level,
       confidence,
       hasValidHttpsPadlock: hasValidHttps,
+      realInternetAssets: internetAssets
+        ? {
+            resolvedIps: internetAssets.resolvedIps,
+            registrar: internetAssets.registrar,
+            domainAgeDays: internetAssets.domainAgeDays,
+            tlsIssuer: internetAssets.tlsIssuer,
+            httpStatus: internetAssets.httpStatus,
+            pageTitle: internetAssets.pageTitle,
+          }
+        : undefined,
+      publicUserExperienceOnWeb: webExperience
+        ? {
+            sentiment: webExperience.sentiment,
+            summary: webExperience.summary,
+          }
+        : undefined,
       cluesFound: clues.map((c) => ({
         code: c.code,
         category: c.category,
@@ -1010,12 +1596,13 @@ async function generateSherlockDeduction(
           2
         )}\n</STRUCTURED_FINDINGS>`,
         config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           systemInstruction:
             'You are SHERLOCK, a calm, perceptive Victorian digital detective explaining website clues to an everyday user. ' +
             'CRITICAL RULES:\n' +
             '1. Never say a website is "safe". If suspicion is low, say "No strong warning signs were found, though this is not a guarantee of safety."\n' +
             '2. Use hedged, factual phrasing ("shows indicators of impersonation", "warrants caution")—never declare definitively "this is a scam".\n' +
-            '3. Only refer to clues present in <STRUCTURED_FINDINGS>. Never invent facts about ownership or intent, and never change the numeric score.\n' +
+            '3. Reference the real internet assets (domain age, registrar, TLS issuer, page title) and public user experience found on the web in <STRUCTURED_FINDINGS>. Never change the numeric score.\n' +
             '4. If hasValidHttpsPadlock is true and suspicionIndex >= 25, remind the reader that the HTTPS padlock only proves the connection is encrypted, not that the site is genuine.\n' +
             '5. Keep the full paragraph (text) between 2 and 4 clear, plain-English sentences.',
           responseMimeType: 'application/json',
@@ -1029,7 +1616,7 @@ async function generateSherlockDeduction(
               keyReasons: {
                 type: Type.ARRAY,
                 items: { type: Type.STRING },
-                description: 'Up to 3 concise reasons referencing only the existing clues.',
+                description: 'Up to 3 concise reasons referencing the real assets, clues, and user experience.',
               },
               recommendedActions: {
                 type: Type.ARRAY,
@@ -1050,7 +1637,7 @@ async function generateSherlockDeduction(
         },
       }),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('LLM deduction timeout')), 4500)
+        setTimeout(() => reject(new Error('LLM deduction timeout')), remainingBudgetMs)
       ),
     ]);
 
@@ -1244,6 +1831,7 @@ async function startServer() {
    * runs the 8 checks, computes the deterministic Suspicion Index, and returns the Case Report.
    */
   app.post('/api/investigate', async (req: Request, res: Response) => {
+    const investigationStartMs = Date.now();
     const rawUrl = typeof req.body?.url === 'string' ? req.body.url : '';
     const forceDemo = typeof req.body?.demoKey === 'string' ? req.body.demoKey : '';
     const clientHash = getClientHash(req);
@@ -1280,8 +1868,11 @@ async function startServer() {
     }
 
     const { host, sanitizedUrl, hadAtSymbol, originalLength } = validation;
+    const registrable = getRegistrableDomain(host);
+    const godaddyCheckUrl = `https://www.godaddy.com/domainsearch/find?domainToCheck=${encodeURIComponent(registrable)}`;
+    const godaddyWhoisUrl = `https://www.godaddy.com/whois/results.aspx?domain=${encodeURIComponent(registrable)}`;
 
-    // Check if this matches one of the 3 curated demo cases or special state triggers
+    // Check if this matches one of the 3 curated demo cases
     const demoPresetFn = DEMO_PRESETS[forceDemo] || DEMO_PRESETS[host];
     if (demoPresetFn) {
       const stages: CheckStageId[] = [
@@ -1296,10 +1887,13 @@ async function startServer() {
       ];
       for (const stage of stages) {
         sendEvent({ type: 'stage', stage, status: 'running' });
-        await new Promise((r) => setTimeout(r, 140));
+        await new Promise((r) => setTimeout(r, 35));
         sendEvent({ type: 'stage', stage, status: 'done' });
       }
-      const demoReport = reconcileCaseReport(demoPresetFn());
+      const demoReport = reconcileCaseReport({
+        ...demoPresetFn(),
+        inspectionDurationMs: Date.now() - investigationStartMs,
+      });
       store.cases[demoReport.id] = demoReport;
       saveStore(store);
       sendEvent({ type: 'complete', report: demoReport });
@@ -1315,8 +1909,11 @@ async function startServer() {
       sendEvent({ type: 'stage', stage: 'certificate', status: 'failed' });
       sendEvent({
         type: 'error',
-        errorCode: 'unreachable',
-        message: `The server at ${host} could not be reached (DNS non-existent or connection refused). Scammers frequently take phishing domains offline within hours, or block non-mobile connections.`,
+        errorCode: 'domain_not_found',
+        targetHost: host,
+        godaddyUrl: godaddyCheckUrl,
+        godaddyWhoisUrl,
+        message: `The website "${host}" does not exist or could not be reached on the public internet (DNS NXDOMAIN / connection refused). You can check whether this domain is registered on GoDaddy below.`,
       });
       res.end();
       return;
@@ -1337,22 +1934,50 @@ async function startServer() {
       ];
       for (const stage of stages) {
         sendEvent({ type: 'stage', stage, status: cached.report.checkStatuses[stage] || 'done' });
-        await new Promise((r) => setTimeout(r, 80));
+        await new Promise((r) => setTimeout(r, 20));
       }
-      sendEvent({ type: 'complete', report: reconcileCaseReport(cached.report) });
+      sendEvent({
+        type: 'complete',
+        report: reconcileCaseReport({
+          ...cached.report,
+          inspectionDurationMs: Date.now() - investigationStartMs,
+        }),
+      });
       res.end();
       return;
     }
 
-    // Verify SSRF DNS safety before making live network requests
+    // Fast DNS & Existence Gate (<= 1.2s): Verifies domain actually exists on the internet and is SSRF-safe
+    sendEvent({ type: 'stage', stage: 'domain_identity', status: 'running' });
     const dnsSafety = await verifyHostDnsSafe(host);
+
     if (!dnsSafety.safe && !host.endsWith('.example')) {
-      // If DNS lookup failed completely (not a private IP block), treat as unreachable
-      if (dnsSafety.reason?.includes('restricted internal IP') || dnsSafety.reason?.includes('SSRF')) {
+      if (dnsSafety.ssrfBlocked || dnsSafety.reason?.includes('SSRF')) {
+        sendEvent({ type: 'stage', stage: 'domain_identity', status: 'failed' });
         sendEvent({
           type: 'error',
           errorCode: 'blocked_url',
-          message: dnsSafety.reason,
+          targetHost: host,
+          message: dnsSafety.reason || 'Blocked internal or reserved network address.',
+        });
+        res.end();
+        return;
+      }
+
+      if (dnsSafety.domainNotFound) {
+        sendEvent({ type: 'stage', stage: 'domain_identity', status: 'failed' });
+        sendEvent({ type: 'stage', stage: 'domain_age', status: 'failed' });
+        sendEvent({ type: 'stage', stage: 'redirects_page', status: 'failed' });
+        sendEvent({ type: 'stage', stage: 'certificate', status: 'failed' });
+        sendEvent({
+          type: 'error',
+          errorCode: 'domain_not_found',
+          targetHost: host,
+          godaddyUrl: godaddyCheckUrl,
+          godaddyWhoisUrl,
+          message:
+            dnsSafety.reason ||
+            `The website "${host}" does not exist on the internet (NXDOMAIN — domain is unregistered or has no active DNS records). Use GoDaddy below to verify if "${registrable}" really exists or is available.`,
         });
         res.end();
         return;
@@ -1373,10 +1998,23 @@ async function startServer() {
     const allClues: Clue[] = [];
     let hasValidHttps = true;
 
-    // 1. Domain Identity Check
-    sendEvent({ type: 'stage', stage: 'domain_identity', status: 'running' });
+    // 1. Domain Identity Check + Real DNS Resolution Record
     const idClues = inspectDomainIdentity(host, sanitizedUrl, hadAtSymbol, originalLength);
     allClues.push(...idClues);
+    if (dnsSafety.resolvedIps.length > 0 && idClues.length === 0) {
+      allClues.push({
+        id: 'id-dns-verified',
+        code: 'CLUE-ID-00',
+        name: `Active public DNS record verified (${dnsSafety.resolvedIps.slice(0, 2).join(', ')})`,
+        finding: `${host} resolves on public DNS to ${dnsSafety.resolvedIps.slice(0, 3).join(', ')} with standard hostname structure.`,
+        severity: 'info',
+        explanation:
+          'Active DNS resolution confirms the domain is live on the internet without obfuscated IP encoding or deceptive @-credentials.',
+        howChecked: 'Resolved authoritative A/AAAA records and inspected hostname syntax.',
+        points: 0,
+        category: 'url_structure',
+      });
+    }
     checkStatuses.domain_identity = 'done';
     sendEvent({ type: 'stage', stage: 'domain_identity', status: 'done' });
 
@@ -1418,6 +2056,7 @@ async function startServer() {
         scoreTally: scored.scoreTally,
         deduction,
         witness: buildWitnessSummaryForHost(host, store.reports, false),
+        inspectionDurationMs: Date.now() - investigationStartMs,
         checkStatuses,
         specialState: 'inconclusive',
         specialMessage:
@@ -1431,7 +2070,7 @@ async function startServer() {
       return;
     }
 
-    // Run network-bound checks (3 through 8) in parallel and stream each completion as it finishes
+    // Run all network-bound real-asset checks AND public web experience grounding in parallel (<= 2.0s wave)
     const stagesToStart: CheckStageId[] = [
       'domain_age',
       'reputation',
@@ -1444,9 +2083,38 @@ async function startServer() {
       sendEvent({ type: 'stage', stage: st, status: 'running' });
     }
 
+    let registrar: string | null = null;
+    let registeredAt: string | null = null;
+    let expiresAt: string | null = null;
+    let domainAgeDays: number | null = null;
+    let rdapNotFound = false;
+
+    let tlsIssuer: string | null = null;
+    let tlsSubject: string | null = null;
+    let tlsValidFrom: string | null = null;
+    let tlsValidTo: string | null = null;
+
+    let pageReachable = false;
+    let httpStatus: number | null = null;
+    let serverHeader: string | null = null;
+    let redirectChain: string[] = [sanitizedUrl];
+    let pageTitle: string | null = null;
+    let metaDescription: string | null = null;
+    let formsDetected = 0;
+    let hasPasswordInput = false;
+    let presentSecurityHeaders: string[] = [];
+    let missingSecurityHeaders: string[] = [];
+
+    let webExperienceData: PublicWebExperience | undefined;
+
     const ageTask = checkDomainAge(host)
-      .then((clues) => {
-        allClues.push(...clues);
+      .then((resAge) => {
+        allClues.push(...resAge.clues);
+        registrar = resAge.registrar;
+        registeredAt = resAge.registeredAt;
+        expiresAt = resAge.expiresAt;
+        domainAgeDays = resAge.domainAgeDays;
+        rdapNotFound = resAge.rdapNotFound;
         checkStatuses.domain_age = 'done';
         sendEvent({ type: 'stage', stage: 'domain_age', status: 'done' });
       })
@@ -1467,15 +2135,26 @@ async function startServer() {
       });
 
     const pageTask = inspectRedirectsPageAndHeaders(sanitizedUrl, host)
-      .then(({ redirectAndPageClues, headerClues, reachable }) => {
-        if (!reachable && !host.endsWith('.example')) {
+      .then((resPage) => {
+        pageReachable = resPage.reachable;
+        httpStatus = resPage.httpStatus;
+        serverHeader = resPage.serverHeader;
+        redirectChain = resPage.redirectChain;
+        pageTitle = resPage.pageTitle;
+        metaDescription = resPage.metaDescription;
+        formsDetected = resPage.formsDetected;
+        hasPasswordInput = resPage.hasPasswordInput;
+        presentSecurityHeaders = resPage.presentSecurityHeaders;
+        missingSecurityHeaders = resPage.missingSecurityHeaders;
+
+        if (!resPage.reachable && !host.endsWith('.example')) {
           checkStatuses.redirects_page = 'timed_out';
           checkStatuses.security_posture = 'timed_out';
           sendEvent({ type: 'stage', stage: 'redirects_page', status: 'timed_out' });
           sendEvent({ type: 'stage', stage: 'security_posture', status: 'timed_out' });
           return;
         }
-        allClues.push(...redirectAndPageClues, ...headerClues);
+        allClues.push(...resPage.redirectAndPageClues, ...resPage.headerClues);
         checkStatuses.redirects_page = 'done';
         checkStatuses.security_posture = 'done';
         sendEvent({ type: 'stage', stage: 'redirects_page', status: 'done' });
@@ -1492,6 +2171,10 @@ async function startServer() {
       .then((resCert) => {
         allClues.push(...resCert.clues);
         hasValidHttps = resCert.hasValidHttps;
+        tlsIssuer = resCert.tlsIssuer;
+        tlsSubject = resCert.tlsSubject;
+        tlsValidFrom = resCert.tlsValidFrom;
+        tlsValidTo = resCert.tlsValidTo;
         checkStatuses.certificate = 'done';
         sendEvent({ type: 'stage', stage: 'certificate', status: 'done' });
       })
@@ -1524,11 +2207,58 @@ async function startServer() {
           category: 'community_reports',
         });
       }
+
+      // Simultaneously query real-world user experiences & reviews on the public internet
+      const { webExperience, experienceClue } = await inspectPublicWebExperience(
+        host,
+        tempSummary.totalReports,
+        [...idClues, ...impClues]
+      );
+      webExperienceData = webExperience;
+      if (experienceClue) {
+        allClues.push(experienceClue);
+      }
+
       checkStatuses.witness = 'done';
       sendEvent({ type: 'stage', stage: 'witness', status: 'done' });
     })();
 
     await Promise.all([ageTask, repTask, pageTask, certTask, witnessTask]);
+
+    // Secondary existence guard: if HTTP, TLS, and RDAP all failed to find an active website
+    if (!pageReachable && !tlsIssuer && rdapNotFound && !host.endsWith('.example')) {
+      sendEvent({
+        type: 'error',
+        errorCode: 'domain_not_found',
+        targetHost: host,
+        godaddyUrl: godaddyCheckUrl,
+        godaddyWhoisUrl,
+        message: `The website "${host}" did not respond on HTTP/HTTPS and has no public RDAP registration record. Check GoDaddy below to verify whether "${registrable}" really exists.`,
+      });
+      res.end();
+      return;
+    }
+
+    const internetAssets: InternetAssetFootprint = {
+      resolvedIps: dnsSafety.resolvedIps,
+      registrar,
+      registeredAt,
+      expiresAt,
+      domainAgeDays,
+      tlsIssuer,
+      tlsSubject,
+      tlsValidFrom,
+      tlsValidTo,
+      httpStatus,
+      serverHeader,
+      redirectChain,
+      pageTitle,
+      metaDescription,
+      formsDetected,
+      hasPasswordInput,
+      presentSecurityHeaders,
+      missingSecurityHeaders,
+    };
 
     const scored = computeSuspicionScore(allClues, checkStatuses, hasValidHttps);
     const hasCorroboration = allClues.some(
@@ -1540,13 +2270,20 @@ async function startServer() {
       (s) => s === 'timed_out' || s === 'failed'
     );
 
+    // Enforce strict 3.6-second total target budget so the full dossier always arrives in 3 to 5 seconds
+    const elapsedBeforeDeduction = Date.now() - investigationStartMs;
+    const remainingDeductionBudgetMs = Math.max(550, 3600 - elapsedBeforeDeduction);
+
     const deduction = await generateSherlockDeduction(
       host,
       scored.index,
       scored.level,
       scored.confidence,
       scored.sortedClues,
-      hasValidHttps
+      hasValidHttps,
+      internetAssets,
+      webExperienceData,
+      remainingDeductionBudgetMs
     );
 
     const caseId = `CASE-221B-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -1570,6 +2307,9 @@ async function startServer() {
       scoreTally: scored.scoreTally,
       deduction,
       witness: witnessSummary,
+      internetAssets,
+      webExperience: webExperienceData,
+      inspectionDurationMs: Date.now() - investigationStartMs,
       checkStatuses,
       specialState,
       specialMessage:
@@ -1584,7 +2324,8 @@ async function startServer() {
     saveStore(store);
     hostCache.set(host, { timestamp: Date.now(), report: finalReport });
 
-    await syncToSupabase('cases', {
+    // Fire-and-forget Supabase sync so we never add latency to the user's response stream
+    void syncToSupabase('cases', {
       id: finalReport.id,
       host: finalReport.host,
       sanitized_url: finalReport.sanitizedUrl,

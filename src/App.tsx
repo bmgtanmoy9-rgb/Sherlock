@@ -10,6 +10,8 @@ import {
   CheckCircle2,
   ClipboardPaste,
   Clock,
+  ExternalLink,
+  Globe,
   Loader2,
   QrCode,
   Search,
@@ -76,6 +78,8 @@ export default function App() {
     state: SpecialStateType;
     message: string;
     targetHost?: string;
+    godaddyUrl?: string;
+    godaddyWhoisUrl?: string;
   } | null>(null);
 
   const [caseHistory, setCaseHistory] = useState<CaseReportData[]>(() => [
@@ -351,11 +355,24 @@ export default function App() {
                 [evt.stage!]: evt.status!,
               }));
             } else if (evt.type === 'error') {
+              const errHost = evt.targetHost || validation.host || '';
+              const fallbackGodaddy = errHost
+                ? `https://www.godaddy.com/domainsearch/find?domainToCheck=${encodeURIComponent(errHost)}`
+                : 'https://www.godaddy.com/domainsearch/find';
+              const fallbackWhois = errHost
+                ? `https://www.godaddy.com/whois/results.aspx?domain=${encodeURIComponent(errHost)}`
+                : 'https://www.godaddy.com/whois';
+
               setSpecialStateError({
-                state: evt.errorCode || 'unreachable',
+                state: evt.errorCode || 'domain_not_found',
                 message: evt.message || 'Could not complete investigation.',
-                targetHost: validation.host,
+                targetHost: errHost,
+                godaddyUrl: evt.godaddyUrl || fallbackGodaddy,
+                godaddyWhoisUrl: evt.godaddyWhoisUrl || fallbackWhois,
               });
+              setTimeout(() => {
+                reportAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }, 100);
             } else if (evt.type === 'complete' && evt.report) {
               const rep = evt.report;
               setCheckStatuses(rep.checkStatuses);
@@ -374,18 +391,28 @@ export default function App() {
         }
       }
     } catch {
-      // Offline / fallback mock mode resilience if backend is temporarily unreachable
       const host = validation.host!;
-      let fallbackReport: CaseReportData;
       if (host === 'ox.ac.uk') {
-        fallbackReport = getLegitimateDemoCase();
+        const fallbackReport = getLegitimateDemoCase();
+        setCheckStatuses(fallbackReport.checkStatuses);
+        setCurrentReport(fallbackReport);
       } else if (host === 'dhl-parcel-redelivery-fee.example') {
-        fallbackReport = getPadlockSuspiciousDemoCase();
+        const fallbackReport = getPadlockSuspiciousDemoCase();
+        setCheckStatuses(fallbackReport.checkStatuses);
+        setCurrentReport(fallbackReport);
+      } else if (host === 'paypa1-secure-login.example') {
+        const fallbackReport = getWorkedExampleCaseReport();
+        setCheckStatuses(fallbackReport.checkStatuses);
+        setCurrentReport(fallbackReport);
       } else {
-        fallbackReport = getWorkedExampleCaseReport();
+        setSpecialStateError({
+          state: 'domain_not_found',
+          message: `The website "${host}" could not be reached or does not exist on the internet. Check GoDaddy below to verify whether this domain is registered.`,
+          targetHost: host,
+          godaddyUrl: `https://www.godaddy.com/domainsearch/find?domainToCheck=${encodeURIComponent(host)}`,
+          godaddyWhoisUrl: `https://www.godaddy.com/whois/results.aspx?domain=${encodeURIComponent(host)}`,
+        });
       }
-      setCheckStatuses(fallbackReport.checkStatuses);
-      setCurrentReport(fallbackReport);
     } finally {
       setIsInvestigating(false);
     }
@@ -708,7 +735,10 @@ export default function App() {
                             : 'Forensic Check Ledger Complete'}
                         </h2>
                         <p className="text-xs text-[#D9C79F]">
-                          8 passive checks with 3.5s per-check timeouts · Target ~10 seconds full dossier
+                          8 parallel real-asset checks · Fast 3–5 second full forensic dossier
+                          {currentReport?.inspectionDurationMs
+                            ? ` · Completed in ${(currentReport.inspectionDurationMs / 1000).toFixed(1)}s`
+                            : ''}
                         </p>
                       </div>
                     </div>
@@ -741,7 +771,7 @@ export default function App() {
                 </div>
               )}
 
-              {/* Special States Card */}
+              {/* Special States Card (Including Non-Existent Domain + GoDaddy Check) */}
               {specialStateError && (
                 <div
                   role="alert"
@@ -761,14 +791,18 @@ export default function App() {
                           ? 'SSRF Safety Guard · Blocked Address'
                           : specialStateError.state === 'rate_limited'
                           ? 'Rate Limit Guard Active'
-                          : 'Target Unreachable'}
+                          : 'DNS & Registry Check · Website Does Not Exist'}
                       </span>
                       <h3 className="font-serif-display text-2xl font-bold text-[#F5CE7A]">
                         {specialStateError.state === 'blocked_url'
                           ? 'Investigation Blocked: Private or Restricted Network Address'
                           : specialStateError.state === 'rate_limited'
                           ? 'Investigation Paused: Rate Limit Reached'
-                          : 'Site Unreachable: Could Not Connect to Target Host'}
+                          : `Website Does Not Exist${
+                              specialStateError.targetHost
+                                ? ` (${specialStateError.targetHost})`
+                                : ''
+                            }`}
                       </h3>
                       <p className="text-sm sm:text-base text-[#D9C79F] leading-relaxed">
                         {specialStateError.message}
@@ -776,14 +810,50 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="pt-2 flex flex-wrap gap-2.5">
+                  <div className="pt-2 flex flex-wrap items-center gap-3">
+                    {(specialStateError.state === 'domain_not_found' ||
+                      specialStateError.state === 'unreachable') && (
+                      <>
+                        <a
+                          href={
+                            specialStateError.godaddyUrl ||
+                            `https://www.godaddy.com/domainsearch/find?domainToCheck=${encodeURIComponent(
+                              specialStateError.targetHost || ''
+                            )}`
+                          }
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="min-h-[46px] px-5 py-2.5 rounded brass-button font-bold text-sm inline-flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <Globe className="w-4 h-4" />
+                          <span>Check Domain on GoDaddy</span>
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+
+                        <a
+                          href={
+                            specialStateError.godaddyWhoisUrl ||
+                            `https://www.godaddy.com/whois/results.aspx?domain=${encodeURIComponent(
+                              specialStateError.targetHost || ''
+                            )}`
+                          }
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="min-h-[46px] px-4 py-2.5 rounded bg-[#170E0B] hover:bg-[#231510] border border-[#C9A04A] text-[#F5CE7A] font-semibold text-sm inline-flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                        >
+                          <span>GoDaddy WHOIS Lookup</span>
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      </>
+                    )}
+
                     <button
                       type="button"
                       onClick={() => {
                         setSpecialStateError(null);
                         handleFocusInvestigateInput();
                       }}
-                      className="min-h-[44px] px-4 py-2 rounded brass-button font-bold text-sm cursor-pointer"
+                      className="min-h-[46px] px-4 py-2.5 rounded bg-[#5A1F26] hover:bg-[#7C2F37] border border-[#C9A04A]/70 text-[#F2E6C9] font-semibold text-sm cursor-pointer"
                     >
                       Investigate a Different Link
                     </button>
@@ -794,12 +864,15 @@ export default function App() {
               {/* Live Case Report Output */}
               {currentReport && (
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <h2 className="font-serif-display text-2xl sm:text-3xl font-bold text-[#F5CE7A]">
                       Active Case Dossier
                     </h2>
                     <span className="font-mono-code text-xs text-[#D9C79F]">
-                      Every score point maps to a clue below
+                      {currentReport.inspectionDurationMs
+                        ? `Inspected in ${(currentReport.inspectionDurationMs / 1000).toFixed(1)}s · `
+                        : ''}
+                      Every score point maps to a real clue below
                     </span>
                   </div>
                   <CaseReportView
