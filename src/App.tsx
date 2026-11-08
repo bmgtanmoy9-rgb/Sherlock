@@ -10,6 +10,8 @@ import {
   CheckCircle2,
   ClipboardPaste,
   Clock,
+  ExternalLink,
+  Globe,
   Loader2,
   QrCode,
   Search,
@@ -25,6 +27,7 @@ import {
 } from './types/sherlock';
 import { CHECK_STAGES } from './engine/weightsConfig';
 import {
+  buildGoDaddyUrls,
   getWorkedExampleCaseReport,
   normalizeAndValidateUrl,
 } from './engine/ruleEngine';
@@ -76,6 +79,8 @@ export default function App() {
     state: SpecialStateType;
     message: string;
     targetHost?: string;
+    godaddyCheckUrl?: string;
+    godaddyWhoisUrl?: string;
   } | null>(null);
 
   const [caseHistory, setCaseHistory] = useState<CaseReportData[]>(() => [
@@ -351,11 +356,18 @@ export default function App() {
                 [evt.stage!]: evt.status!,
               }));
             } else if (evt.type === 'error') {
+              const errHost = evt.targetHost || validation.host || trimmed;
+              const gd = buildGoDaddyUrls(errHost);
               setSpecialStateError({
                 state: evt.errorCode || 'unreachable',
                 message: evt.message || 'Could not complete investigation.',
-                targetHost: validation.host,
+                targetHost: errHost,
+                godaddyCheckUrl: evt.godaddyCheckUrl || gd.godaddyCheckUrl,
+                godaddyWhoisUrl: evt.godaddyWhoisUrl || gd.godaddyWhoisUrl,
               });
+              setTimeout(() => {
+                reportAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }, 120);
             } else if (evt.type === 'complete' && evt.report) {
               const rep = evt.report;
               setCheckStatuses(rep.checkStatuses);
@@ -374,18 +386,35 @@ export default function App() {
         }
       }
     } catch {
-      // Offline / fallback mock mode resilience if backend is temporarily unreachable
       const host = validation.host!;
-      let fallbackReport: CaseReportData;
-      if (host === 'ox.ac.uk') {
-        fallbackReport = getLegitimateDemoCase();
-      } else if (host === 'dhl-parcel-redelivery-fee.example') {
-        fallbackReport = getPadlockSuspiciousDemoCase();
+      if (host === 'ox.ac.uk' || demoKey === 'ox.ac.uk') {
+        const fallbackReport = getLegitimateDemoCase();
+        setCheckStatuses(fallbackReport.checkStatuses);
+        setCurrentReport(fallbackReport);
+      } else if (
+        host === 'dhl-parcel-redelivery-fee.example' ||
+        demoKey === 'dhl-parcel-redelivery-fee.example'
+      ) {
+        const fallbackReport = getPadlockSuspiciousDemoCase();
+        setCheckStatuses(fallbackReport.checkStatuses);
+        setCurrentReport(fallbackReport);
+      } else if (
+        host === 'paypa1-secure-login.example' ||
+        demoKey === 'paypa1-secure-login.example'
+      ) {
+        const fallbackReport = getWorkedExampleCaseReport();
+        setCheckStatuses(fallbackReport.checkStatuses);
+        setCurrentReport(fallbackReport);
       } else {
-        fallbackReport = getWorkedExampleCaseReport();
+        const gd = buildGoDaddyUrls(host);
+        setSpecialStateError({
+          state: 'domain_not_found',
+          message: `Could not reach or resolve "${host}". The domain may not exist on the internet or the connection was interrupted. Verify whether this domain is registered on GoDaddy.`,
+          targetHost: host,
+          godaddyCheckUrl: gd.godaddyCheckUrl,
+          godaddyWhoisUrl: gd.godaddyWhoisUrl,
+        });
       }
-      setCheckStatuses(fallbackReport.checkStatuses);
-      setCurrentReport(fallbackReport);
     } finally {
       setIsInvestigating(false);
     }
@@ -741,7 +770,7 @@ export default function App() {
                 </div>
               )}
 
-              {/* Special States Card */}
+              {/* Special States Card (Including Non-Existent Domain + GoDaddy Verification) */}
               {specialStateError && (
                 <div
                   role="alert"
@@ -752,38 +781,99 @@ export default function App() {
                       <AlertOctagon className="w-7 h-7 text-[#B3342F] shrink-0 mt-0.5" />
                     ) : specialStateError.state === 'rate_limited' ? (
                       <Clock className="w-7 h-7 text-[#D9A93A] shrink-0 mt-0.5" />
+                    ) : specialStateError.state === 'domain_not_found' ? (
+                      <Globe className="w-7 h-7 text-[#E9A872] shrink-0 mt-0.5" />
                     ) : (
                       <WifiOff className="w-7 h-7 text-[#E9A872] shrink-0 mt-0.5" />
                     )}
-                    <div className="space-y-1.5">
-                      <span className="font-mono-code text-xs uppercase tracking-wider px-2.5 py-0.5 rounded bg-[#5A1F26] text-[#F5CE7A]">
+                    <div className="space-y-2 flex-1">
+                      <span className="font-mono-code text-xs uppercase tracking-wider px-2.5 py-0.5 rounded bg-[#5A1F26] text-[#F5CE7A] inline-block">
                         {specialStateError.state === 'blocked_url'
                           ? 'SSRF Safety Guard · Blocked Address'
                           : specialStateError.state === 'rate_limited'
                           ? 'Rate Limit Guard Active'
+                          : specialStateError.state === 'domain_not_found'
+                          ? 'DNS & Registry Check · Website Does Not Exist'
                           : 'Target Unreachable'}
                       </span>
-                      <h3 className="font-serif-display text-2xl font-bold text-[#F5CE7A]">
+                      <h3 className="font-serif-display text-xl sm:text-2xl font-bold text-[#F5CE7A]">
                         {specialStateError.state === 'blocked_url'
                           ? 'Investigation Blocked: Private or Restricted Network Address'
                           : specialStateError.state === 'rate_limited'
                           ? 'Investigation Paused: Rate Limit Reached'
+                          : specialStateError.state === 'domain_not_found'
+                          ? `Website Does Not Exist: "${specialStateError.targetHost || 'Domain'}" Not Found on the Internet`
                           : 'Site Unreachable: Could Not Connect to Target Host'}
                       </h3>
                       <p className="text-sm sm:text-base text-[#D9C79F] leading-relaxed">
                         {specialStateError.message}
                       </p>
+
+                      {(specialStateError.state === 'domain_not_found' ||
+                        specialStateError.state === 'unreachable') &&
+                        specialStateError.targetHost && (
+                          <div className="mt-3 p-3.5 rounded bg-[#170E0B] border border-[#C9A04A]/50 text-xs sm:text-sm text-[#F2E6C9] space-y-1.5">
+                            <p className="font-semibold text-[#F5CE7A]">
+                              Verify Domain Existence &amp; Registration on GoDaddy:
+                            </p>
+                            <p className="text-[#D9C79F]">
+                              Because <span className="font-mono-code text-[#F2E6C9]">{specialStateError.targetHost}</span> did not resolve to any active public IP address or registry record, SHERLOCK withholds any artificial ranking. Use GoDaddy Domain Search or WHOIS below to confirm if this domain exists or is unregistered.
+                            </p>
+                          </div>
+                        )}
                     </div>
                   </div>
 
-                  <div className="pt-2 flex flex-wrap gap-2.5">
+                  <div className="pt-2 flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-3">
+                    {(specialStateError.state === 'domain_not_found' ||
+                      specialStateError.state === 'unreachable') &&
+                      specialStateError.targetHost && (
+                        <>
+                          <a
+                            href={
+                              specialStateError.godaddyCheckUrl ||
+                              `https://www.godaddy.com/domainsearch/find?domainToCheck=${encodeURIComponent(
+                                specialStateError.targetHost
+                              )}`
+                            }
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="min-h-[46px] px-5 py-2.5 rounded brass-button font-bold text-sm inline-flex items-center justify-center gap-2 cursor-pointer"
+                          >
+                            <Globe className="w-4 h-4 shrink-0" />
+                            <span>Check Domain on GoDaddy</span>
+                            <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                          </a>
+
+                          <a
+                            href={
+                              specialStateError.godaddyWhoisUrl ||
+                              `https://www.godaddy.com/whois/results.aspx?domain=${encodeURIComponent(
+                                specialStateError.targetHost
+                              )}`
+                            }
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="min-h-[46px] px-4 py-2.5 rounded bg-[#170E0B] hover:bg-[#231510] border border-[#C9A04A] text-[#F5CE7A] font-semibold text-sm inline-flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                          >
+                            <span>GoDaddy WHOIS Lookup</span>
+                            <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                          </a>
+                        </>
+                      )}
+
                     <button
                       type="button"
                       onClick={() => {
                         setSpecialStateError(null);
                         handleFocusInvestigateInput();
                       }}
-                      className="min-h-[44px] px-4 py-2 rounded brass-button font-bold text-sm cursor-pointer"
+                      className={`min-h-[46px] px-4 py-2.5 rounded font-bold text-sm cursor-pointer ${
+                        specialStateError.state === 'domain_not_found' ||
+                        specialStateError.state === 'unreachable'
+                          ? 'bg-[#5A1F26] hover:bg-[#7C2F37] border border-[#C9A04A]/80 text-[#F2E6C9]'
+                          : 'brass-button'
+                      }`}
                     >
                       Investigate a Different Link
                     </button>

@@ -5,6 +5,7 @@ import type {
   CheckStatus,
   Clue,
   ConfidenceLevel,
+  ScoreTallySummary,
   SherlockDeduction,
   SuspicionLevel,
 } from '../types/sherlock.ts';
@@ -29,51 +30,97 @@ export interface NormalizedUrlResult {
 }
 
 /**
- * Checks whether an IPv4/IPv6 literal or hostname belongs to private, loopback,
- * link-local, or cloud metadata ranges (SSRF guard).
+ * Checks whether an IPv4/IPv6 literal, hex/octal/decimal IP encoding, or hostname
+ * belongs to private, loopback, link-local, or cloud metadata ranges (SSRF guard).
  */
 export function isPrivateOrReservedHost(host: string): boolean {
-  const clean = host.toLowerCase().replace(/^\[|\]$/g, '');
+  const clean = host.toLowerCase().trim().replace(/^\[|\]$/g, '').replace(/\.$/, '');
 
   if (
+    !clean ||
     clean === 'localhost' ||
     clean.endsWith('.localhost') ||
     clean.endsWith('.local') ||
+    clean.endsWith('.localdomain') ||
     clean.endsWith('.internal') ||
+    clean.endsWith('.home.arpa') ||
+    clean.endsWith('.corp') ||
+    clean.endsWith('.lan') ||
     clean === '0.0.0.0' ||
+    clean === '255.255.255.255' ||
     clean === '::1' ||
     clean === '::' ||
+    clean === '0:0:0:0:0:0:0:1' ||
+    clean === '0:0:0:0:0:0:0:0' ||
     clean === 'metadata.google.internal' ||
-    clean === 'instance-data'
+    clean === 'metadata' ||
+    clean === 'instance-data' ||
+    clean === 'kubernetes.default' ||
+    clean.endsWith('.kubernetes.default.svc')
   ) {
     return true;
   }
 
-  // IPv6 private/link-local
+  // Block integer/hex/octal encoded IP literals (e.g. 2130706433, 0x7f000001, 0177.0.0.1)
+  if (/^\d+$/.test(clean) || /^0x[0-9a-f]+$/i.test(clean)) {
+    return true;
+  }
+
+  const dotParts = clean.split('.');
+  if (
+    dotParts.length <= 4 &&
+    dotParts.every((p) => /^\d+$/.test(p) || /^0x[0-9a-f]+$/i.test(p))
+  ) {
+    // Any octal (leading zero like 0177) or hex octet in an IP literal is blocked as SSRF evasion
+    if (dotParts.some((p) => /^0x/i.test(p) || (p.length > 1 && p.startsWith('0')))) {
+      return true;
+    }
+    // Shorthand IPv4 (e.g., 127.1 or 10.1.1)
+    if (dotParts.length < 4) {
+      return true;
+    }
+  }
+
+  // IPv6 private, loopback, link-local, documentation, multicast, or IPv4-mapped ranges
   if (clean.includes(':')) {
     if (
       clean.startsWith('fe80:') ||
+      clean.startsWith('feb0:') ||
       clean.startsWith('fc00:') ||
-      clean.startsWith('fd00:') ||
+      clean.startsWith('fd') ||
+      clean.startsWith('ff') ||
+      clean.startsWith('2001:db8:') ||
       clean.startsWith('::ffff:127.') ||
       clean.startsWith('::ffff:10.') ||
+      clean.startsWith('::ffff:0.') ||
       clean.startsWith('::ffff:192.168.') ||
-      clean.startsWith('::ffff:169.254.')
+      clean.startsWith('::ffff:169.254.') ||
+      /^::ffff:172\.(1[6-9]|2\d|3[01])\./.test(clean) ||
+      clean.startsWith('::127.') ||
+      clean.startsWith('::10.') ||
+      clean.startsWith('::192.168.')
     ) {
       return true;
     }
   }
 
-  // IPv4 literal check
+  // Standard IPv4 literal check
   const ipv4Match = clean.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (ipv4Match) {
-    const [, aStr, bStr] = ipv4Match;
+    const [, aStr, bStr, cStr, dStr] = ipv4Match;
     const a = Number(aStr);
     const b = Number(bStr);
+    const c = Number(cStr);
+    const d = Number(dStr);
+    if (a > 255 || b > 255 || c > 255 || d > 255) return true;
     if (a === 0 || a === 10 || a === 127) return true;
     if (a === 169 && b === 254) return true; // Cloud metadata / link-local
     if (a === 172 && b >= 16 && b <= 31) return true; // RFC1918
     if (a === 192 && b === 168) return true; // RFC1918
+    if (a === 192 && b === 0 && (c === 0 || c === 2)) return true; // IETF protocol / TEST-NET-1
+    if (a === 198 && (b === 18 || b === 19)) return true; // Benchmarking
+    if (a === 198 && b === 51 && c === 100) return true; // TEST-NET-2
+    if (a === 203 && b === 0 && c === 113) return true; // TEST-NET-3
     if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
     if (a >= 224) return true; // Multicast / reserved
   }
@@ -90,18 +137,40 @@ export function isIpLiteral(host: string): boolean {
 
 /**
  * Normalizes user input URL, enforces http/https on standard ports,
- * strips query strings and fragments for privacy, and blocks SSRF ranges.
+ * strips query strings and fragments for privacy, and blocks SSRF and injection vectors.
  */
 export function normalizeAndValidateUrl(rawInput: string): NormalizedUrlResult {
-  const trimmed = rawInput.trim();
-  if (!trimmed) {
+  if (typeof rawInput !== 'string') {
+    return { valid: false, reason: 'Invalid URL input format.' };
+  }
+
+  // Strip null bytes and invisible control characters
+  const cleanedInput = rawInput.replace(/[\u0000-\u001F\u007F]/g, '').trim();
+  if (!cleanedInput) {
     return { valid: false, reason: 'Please paste a website link or domain name to investigate.' };
   }
 
-  const hadAtSymbol = trimmed.includes('@');
-  const withProtocol = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(trimmed)
-    ? trimmed
-    : `https://${trimmed}`;
+  if (cleanedInput.length > 2048) {
+    return {
+      valid: false,
+      blocked: true,
+      reason: 'URL exceeds the maximum safe length of 2,048 characters.',
+    };
+  }
+
+  // Block dangerous schemes before adding default https://
+  if (/^(javascript|data|vbscript|file|ftp|gopher|ws|wss|dict|ldap|jar|mailto|tel):/i.test(cleanedInput)) {
+    return {
+      valid: false,
+      blocked: true,
+      reason: 'Non-HTTP scheme is blocked by the security guard.',
+    };
+  }
+
+  const hadAtSymbol = cleanedInput.includes('@');
+  const withProtocol = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(cleanedInput)
+    ? cleanedInput
+    : `https://${cleanedInput}`;
 
   let parsed: URL;
   try {
@@ -129,11 +198,20 @@ export function normalizeAndValidateUrl(rawInput: string): NormalizedUrlResult {
     };
   }
 
-  const host = parsed.hostname.toLowerCase();
-  if (!host || (!host.includes('.') && !isIpLiteral(host))) {
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, '');
+  if (!host || host.length > 253 || (!host.includes('.') && !isIpLiteral(host))) {
     return {
       valid: false,
       reason: 'Please enter a full domain name (for example, example.com).',
+    };
+  }
+
+  // Reject hostnames with suspicious shell/HTML/script characters
+  if (/[<>'"`;\\{}|\s^]/.test(host)) {
+    return {
+      valid: false,
+      blocked: true,
+      reason: 'Hostname contains disallowed characters blocked by the security guard.',
     };
   }
 
@@ -147,7 +225,10 @@ export function normalizeAndValidateUrl(rawInput: string): NormalizedUrlResult {
   }
 
   // Strip query string and fragment before storing or sharing
-  const cleanPathname = parsed.pathname === '/' ? '' : parsed.pathname.replace(/\/+$/, '');
+  const cleanPathname =
+    parsed.pathname === '/'
+      ? ''
+      : parsed.pathname.replace(/[<>"'`]/g, '').replace(/\/+$/, '');
   const sanitizedUrl = `${parsed.protocol}//${host}${cleanPathname}`;
 
   return {
@@ -156,7 +237,7 @@ export function normalizeAndValidateUrl(rawInput: string): NormalizedUrlResult {
     host,
     protocol: parsed.protocol as 'http:' | 'https:',
     hadAtSymbol: hadAtSymbol || Boolean(parsed.username || parsed.password),
-    originalLength: trimmed.length,
+    originalLength: cleanedInput.length,
   };
 }
 
@@ -423,6 +504,7 @@ export function computeSuspicionScore(
   confidence: ConfidenceLevel;
   sortedClues: Clue[];
   categoryBreakdown: CategoryBreakdown[];
+  scoreTally: ScoreTallySummary;
   overrideTriggered: boolean;
 } {
   // Count completed checks
@@ -481,9 +563,15 @@ export function computeSuspicionScore(
     return b.points - a.points;
   });
 
+  const rawTotal = categoryBreakdown.reduce((acc, row) => acc + row.points, 0);
+  const rawUnclampedTotal = categoryBreakdown.reduce(
+    (acc, row) => acc + (row.rawPoints ?? row.points),
+    0
+  );
+  const maxPossibleCategorySum = CATEGORY_WEIGHTS.reduce((acc, row) => acc + row.maxPoints, 0);
+
   // If too few checks succeeded (< 4) and no strong signal or override was found,
   // return Inconclusive rather than a falsely reassuring low score.
-  const rawTotal = categoryBreakdown.reduce((acc, row) => acc + row.points, 0);
   if (completedCount < 4 && rawTotal < 50 && !overrideTriggered) {
     return {
       index: null,
@@ -491,13 +579,29 @@ export function computeSuspicionScore(
       confidence: 'low',
       sortedClues,
       categoryBreakdown,
+      scoreTally: {
+        categoryPointsSum: rawTotal,
+        rawCategoryPointsSum: rawUnclampedTotal,
+        maxPossibleCategorySum,
+        overrideActive: false,
+        overrideAdjustment: 0,
+        clampingAdjustment: 0,
+        finalIndex: null,
+      },
       overrideTriggered: false,
     };
   }
 
-  let finalIndex = Math.min(100, rawTotal);
+  const clampedTotal = Math.min(100, rawTotal);
+  const clampingAdjustment = rawTotal > 100 ? rawTotal - 100 : 0;
+  let finalIndex = clampedTotal;
+  let overrideAdjustment = 0;
+
   if (overrideTriggered) {
-    finalIndex = Math.max(90, finalIndex);
+    if (finalIndex < 90) {
+      overrideAdjustment = 90 - finalIndex;
+      finalIndex = 90;
+    }
   }
 
   let level: SuspicionLevel = 'low';
@@ -520,7 +624,55 @@ export function computeSuspicionScore(
     confidence,
     sortedClues,
     categoryBreakdown,
+    scoreTally: {
+      categoryPointsSum: rawTotal,
+      rawCategoryPointsSum: rawUnclampedTotal,
+      maxPossibleCategorySum,
+      overrideActive: overrideTriggered,
+      overrideAdjustment,
+      clampingAdjustment,
+      finalIndex,
+    },
     overrideTriggered,
+  };
+}
+
+export function buildGoDaddyUrls(host: string): {
+  godaddyCheckUrl: string;
+  godaddyWhoisUrl: string;
+} {
+  const cleanHost = host.trim().toLowerCase().replace(/^www\./, '');
+  return {
+    godaddyCheckUrl: `https://www.godaddy.com/domainsearch/find?domainToCheck=${encodeURIComponent(cleanHost)}`,
+    godaddyWhoisUrl: `https://www.godaddy.com/whois/results.aspx?domain=${encodeURIComponent(cleanHost)}`,
+  };
+}
+
+/**
+ * Ensures any CaseReportData object (including cached or stored records) has
+ * a freshly reconciled categoryBreakdown and scoreTally summary.
+ */
+export function reconcileCaseReport(report: CaseReportData): CaseReportData {
+  const scored = computeSuspicionScore(
+    report.clues || [],
+    report.checkStatuses,
+    report.hasValidHttps
+  );
+  const urls = buildGoDaddyUrls(report.host);
+  return {
+    ...report,
+    index: report.specialState === 'inconclusive' ? null : scored.index,
+    level: report.specialState === 'inconclusive' ? 'inconclusive' : scored.level,
+    categoryBreakdown: scored.categoryBreakdown,
+    scoreTally: scored.scoreTally,
+    overrideTriggered: scored.overrideTriggered,
+    internetAssets: report.internetAssets
+      ? {
+          ...report.internetAssets,
+          godaddyCheckUrl: report.internetAssets.godaddyCheckUrl || urls.godaddyCheckUrl,
+          godaddyWhoisUrl: report.internetAssets.godaddyWhoisUrl || urls.godaddyWhoisUrl,
+        }
+      : undefined,
   };
 }
 
@@ -733,6 +885,7 @@ export function getWorkedExampleCaseReport(): CaseReportData {
     confidence: scored.confidence, // high
     clues: scored.sortedClues,
     categoryBreakdown: scored.categoryBreakdown,
+    scoreTally: scored.scoreTally,
     deduction: {
       summary:
         'This site shows several signs of impersonating a payment service: its address closely resembles a well-known brand, it was registered only days ago, and its login form sends data to a different website.',
@@ -765,6 +918,47 @@ export function getWorkedExampleCaseReport(): CaseReportData {
       firstReported: '2026-11-03T11:20:00.000Z',
       lastReported: '2026-11-07T19:05:00.000Z',
       corroborated: true,
+    },
+    internetAssets: {
+      resolvedIps: ['198.51.100.44'],
+      registrar: 'NameSilo, LLC (Synthetic Demo Registry)',
+      registeredAt: '2026-11-02T09:14:00.000Z',
+      expiresAt: '2027-11-02T09:14:00.000Z',
+      domainAgeDays: 6,
+      tlsIssuer: "Let's Encrypt (R3 DV Automated)",
+      tlsSubject: 'paypa1-secure-login.example',
+      tlsValidFrom: '2026-11-03T00:00:00.000Z',
+      tlsValidTo: '2027-02-01T23:59:59.000Z',
+      tlsProtocol: 'TLSv1.3',
+      httpStatus: 200,
+      serverHeader: 'nginx',
+      redirectChain: [
+        'https://paypa1-secure-login.example/verify',
+        'https://auth-session-gate.example/login',
+      ],
+      pageTitle: 'PayPal: Confirm Your Identity & Security Key',
+      metaDescription: 'Please sign in to restore full access to your wallet.',
+      formsDetected: 1,
+      hasPasswordInput: true,
+      presentSecurityHeaders: ['X-Content-Type-Options'],
+      missingSecurityHeaders: ['HSTS', 'CSP', 'X-Frame-Options', 'Referrer-Policy'],
+      ...buildGoDaddyUrls('paypa1-secure-login.example'),
+    },
+    webExperience: {
+      sentiment: 'negative',
+      summary:
+        'Public user reports and security forums flag this lookalike address as an SMS and email credential-harvesting lure that substitutes the number "1" for the letter "l" in PayPal.',
+      highlights: [
+        'Multiple users report receiving urgent "account restricted" SMS links pointing to this domain.',
+        'Domain registration is only 6 days old despite displaying official payment brand logos.',
+        'Login form transmits credentials to an external collection server.',
+      ],
+      sources: [
+        {
+          title: 'PayPal Official Security Center — Recognizing Phishing Links',
+          url: 'https://www.paypal.com/us/security/learn/phishing',
+        },
+      ],
     },
     checkStatuses,
     specialState: 'none',

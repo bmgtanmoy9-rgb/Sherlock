@@ -55,6 +55,16 @@ export interface CategoryBreakdown {
   clueCount?: number;
 }
 
+export interface ScoreTallySummary {
+  categoryPointsSum: number;
+  rawCategoryPointsSum: number;
+  maxPossibleCategorySum: number;
+  overrideActive: boolean;
+  overrideAdjustment: number;
+  clampingAdjustment: number;
+  finalIndex: number | null;
+}
+
 export interface SherlockDeduction {
   summary: string;
   keyReasons: string[];
@@ -94,9 +104,41 @@ export type SpecialStateType =
   | 'none'
   | 'inconclusive'
   | 'unreachable'
+  | 'domain_not_found'
   | 'blocked_url'
   | 'rate_limited'
   | 'partial_results';
+
+export interface InternetAssetFootprint {
+  resolvedIps: string[];
+  registrar: string | null;
+  registeredAt: string | null;
+  expiresAt: string | null;
+  domainAgeDays: number | null;
+  tlsIssuer: string | null;
+  tlsSubject: string | null;
+  tlsValidFrom: string | null;
+  tlsValidTo: string | null;
+  tlsProtocol?: string | null;
+  httpStatus: number | null;
+  serverHeader: string | null;
+  redirectChain: string[];
+  pageTitle: string | null;
+  metaDescription: string | null;
+  formsDetected: number;
+  hasPasswordInput: boolean;
+  presentSecurityHeaders: string[];
+  missingSecurityHeaders: string[];
+  godaddyCheckUrl: string;
+  godaddyWhoisUrl: string;
+}
+
+export interface PublicWebExperience {
+  sentiment: 'positive' | 'mixed' | 'negative' | 'unverified';
+  summary: string;
+  highlights: string[];
+  sources: Array<{ title: string; url: string }>;
+}
 
 export interface CaseReportData {
   id: string;
@@ -108,8 +150,11 @@ export interface CaseReportData {
   confidence: ConfidenceLevel;
   clues: Clue[];
   categoryBreakdown: CategoryBreakdown[];
+  scoreTally?: ScoreTallySummary;
   deduction: SherlockDeduction;
   witness: WitnessSummary;
+  internetAssets?: InternetAssetFootprint;
+  webExperience?: PublicWebExperience;
   checkStatuses: Record<CheckStageId, CheckStatus>;
   specialState: SpecialStateType;
   specialMessage?: string;
@@ -126,4 +171,8 @@ export interface CheckProgressEvent {
   report?: CaseReportData;
   errorCode?: SpecialStateType;
   message?: string;
+  targetHost?: string;
+  godaddyCheckUrl?: string;
+  godaddyWhoisUrl?: string;
 }
+

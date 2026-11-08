@@ -7,6 +7,7 @@ import type {
   WitnessSummary,
 } from '../types/sherlock.ts';
 import {
+  buildGoDaddyUrls,
   buildTemplateDeduction,
   computeSuspicionScore,
   getWorkedExampleCaseReport,
@@ -80,6 +81,7 @@ export function getLegitimateDemoCase(): CaseReportData {
     confidence: scored.confidence, // high
     clues: scored.sortedClues,
     categoryBreakdown: scored.categoryBreakdown,
+    scoreTally: scored.scoreTally,
     deduction,
     witness: {
       host,
@@ -95,6 +97,45 @@ export function getLegitimateDemoCase(): CaseReportData {
       firstReported: null,
       lastReported: null,
       corroborated: false,
+    },
+    internetAssets: {
+      resolvedIps: ['129.67.242.154', '129.67.242.155'],
+      registrar: 'Jisc Services Limited (.ac.uk Registry)',
+      registeredAt: '1988-02-11T00:00:00.000Z',
+      expiresAt: '2030-02-11T00:00:00.000Z',
+      domainAgeDays: 14150,
+      tlsIssuer: 'Sectigo RSA Organization Validation Secure Server CA',
+      tlsSubject: 'ox.ac.uk',
+      tlsValidFrom: '2026-03-01T00:00:00.000Z',
+      tlsValidTo: '2027-03-31T23:59:59.000Z',
+      tlsProtocol: 'TLSv1.3',
+      httpStatus: 200,
+      serverHeader: 'Apache / Oxford Institutional Edge',
+      redirectChain: ['https://www.ox.ac.uk/'],
+      pageTitle: 'University of Oxford',
+      metaDescription:
+        'Welcome to the official website of the University of Oxford — admissions, research, colleges, and academic divisions.',
+      formsDetected: 1,
+      hasPasswordInput: false,
+      presentSecurityHeaders: ['HSTS', 'X-Frame-Options', 'Referrer-Policy'],
+      missingSecurityHeaders: ['CSP'],
+      ...buildGoDaddyUrls(host),
+    },
+    webExperience: {
+      sentiment: 'positive',
+      summary:
+        'Across global academic directories, student forums, and public web indices, ox.ac.uk is universally recognized as the official domain of the University of Oxford with decades of institutional history.',
+      highlights: [
+        'Governed under the restricted UK academic (.ac.uk) registry operated by Jisc.',
+        'Long-standing institutional reputation with zero corroborated phishing or scam reports.',
+        'Standard HSTS and organization-validated TLS encryption active.',
+      ],
+      sources: [
+        {
+          title: 'University of Oxford — Official Website',
+          url: 'https://www.ox.ac.uk',
+        },
+      ],
     },
     checkStatuses: ALL_DONE,
     specialState: 'none',
@@ -196,6 +237,7 @@ export function getPadlockSuspiciousDemoCase(): CaseReportData {
     confidence: scored.confidence, // high
     clues: scored.sortedClues,
     categoryBreakdown: scored.categoryBreakdown,
+    scoreTally: scored.scoreTally,
     deduction: {
       summary:
         'Despite displaying a valid HTTPS padlock, this site shows strong indicators of a parcel redelivery fee trap.',
@@ -228,6 +270,44 @@ export function getPadlockSuspiciousDemoCase(): CaseReportData {
       firstReported: '2026-11-05T09:15:00.000Z',
       lastReported: '2026-11-07T21:40:00.000Z',
       corroborated: true,
+    },
+    internetAssets: {
+      resolvedIps: ['198.51.100.89'],
+      registrar: 'Namecheap, Inc. (Synthetic Demo Registry)',
+      registeredAt: '2026-10-25T11:30:00.000Z',
+      expiresAt: '2027-10-25T11:30:00.000Z',
+      domainAgeDays: 14,
+      tlsIssuer: 'Google Trust Services LLC (WE1 DV)',
+      tlsSubject: 'dhl-parcel-redelivery-fee.example',
+      tlsValidFrom: '2026-11-06T04:00:00.000Z',
+      tlsValidTo: '2027-02-04T03:59:59.000Z',
+      tlsProtocol: 'TLSv1.3',
+      httpStatus: 200,
+      serverHeader: 'cloudflare',
+      redirectChain: ['https://dhl-parcel-redelivery-fee.example/track-fee'],
+      pageTitle: 'DHL Express — Action Required: Unpaid Parcel Redelivery Fee (£1.99)',
+      metaDescription: 'Enter your billing address and card details to schedule parcel redelivery.',
+      formsDetected: 1,
+      hasPasswordInput: false,
+      presentSecurityHeaders: ['HSTS'],
+      missingSecurityHeaders: ['CSP', 'X-Frame-Options', 'Referrer-Policy'],
+      ...buildGoDaddyUrls(host),
+    },
+    webExperience: {
+      sentiment: 'negative',
+      summary:
+        'Public consumer forums and scam-reporting boards describe widespread SMS "missed parcel fee" messages directing recipients to newly registered lookalike courier domains with valid HTTPS padlocks.',
+      highlights: [
+        'Recipients report unsolicited text messages demanding a small (£1.99 / $2.50) customs or redelivery charge.',
+        'Uses a valid 2-day-old HTTPS certificate so browsers display a padlock icon.',
+        'Official DHL parcel tracking is conducted on dhl.com, never on hyphenated fee domains.',
+      ],
+      sources: [
+        {
+          title: 'DHL Official Fraud Awareness & Phishing Guide',
+          url: 'https://www.dhl.com/global-en/home/footer/fraud-awareness.html',
+        },
+      ],
     },
     checkStatuses: ALL_DONE,
     specialState: 'none',

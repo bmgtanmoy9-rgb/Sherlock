@@ -1,92 +1,135 @@
-# Deterministic Score Breakdown Fix & Mobile-Friendly Hero Video Overhaul
+# Real Internet Asset Forensics, Public Web Experience Grounding & Non-Existent Domain GoDaddy Verification
 
-This update resolves the mathematical discrepancy in the **Deterministic Score Breakdown by Category** by adding a transparent calculation tally row that reconciles raw category points, reputation overrides, and 100-point clamping with the final Suspicion Index, while fixing **mobile hero video autoplay** and optimizing **multi-device responsiveness** across phones, tablets, and desktops.
+This update upgrades SHERLOCK to base every ranking, clue, and descriptive deduction on verifiable real-world internet assets (live DNS records, RDAP WHOIS registrar data, X.509 TLS certificate chains, HTTP headers, and static HTML/form metadata) combined with real people's experiences found across the public internet via Google Search Grounding. When a queried domain does not exist (`NXDOMAIN` / unregistered), SHERLOCK immediately halts the investigation, displays a dedicated **Website Does Not Exist** alert card, and provides a one-click **GoDaddy Domain Check** action so users can verify whether the domain is registered.
+
+---
 
 ## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> The following product and design decisions incorporate your confirmed answers and mobile usability requirements before code execution begins:
+> The following architectural and UX decisions incorporate your confirmed preferences from the clarification step:
 
-- **Confirmed Decision 1 — Score Breakdown Reconciliation**: The category breakdown will include an explicit **Total Score Calculation Tally** at the bottom of the category bars that displays the Raw Category Sum, any active Reputation Blocklist Override (`≥ 90/100`) or Community Corroboration adjustment, and the Final Clamped Suspicion Index (`0–100`) so the numbers always add up transparently.
-- **Confirmed Decision 2 — Reputation Override & Active Category Visibility**: When a threat intelligence override is triggered, an explicit **Reputation Feed Override** indicator row will appear in the breakdown alongside the 8 core forensic categories, and each category row will indicate how many clues fired in that category.
-- **Confirmed Decision 3 — Mobile Hero Video Playback Fix**: The hero background video will remain at full DOM visibility (`opacity-100`) with a native `poster` attribute, direct MP4 source binding, and multi-event mobile unlock listeners (`touchstart`, `pointerdown`, `scroll`, and section re-entry) so iOS Safari and Android Chrome never throttle or pause playback.
-- **Confirmed Decision 4 — Full Cross-Device Responsiveness**: All 7 views, data tables, forensic cards, navigation drawers, and footer rating widgets will be responsive across small mobile screens (`360px–430px`), tablets (`768px–1024px`), and widescreen desktops (`1440px`), adhering to `44px×44px` minimum touch targets and the 15% mobile sticky height cap.
+- **Confirmed Decision 1 — Non-Existent Domain Detection & GoDaddy Verification**: When DNS resolution (`A`, `AAAA`, or `NS` lookup) and RDAP registry checks confirm a domain does not exist on the public internet (`ENOTFOUND` / `NXDOMAIN`), SHERLOCK immediately halts scoring rather than generating a synthetic score. It displays a dedicated **Website Does Not Exist** card with a prominent button that opens GoDaddy's Domain Search (`godaddy.com/domainsearch/find?domainToCheck=...`) and WHOIS lookup to verify registration status.
+- **Confirmed Decision 2 — Real Internet Asset Profiling**: Live investigations capture and display actual network and asset telemetry—resolved IP addresses, RDAP registrar and creation/expiration timestamps, TLS certificate issuer and validity window, redirect chain hops, HTTP response headers, and parsed HTML `<title>`, meta description, and credential form behaviors.
+- **Confirmed Decision 3 — Public Internet User Experience Grounding**: SHERLOCK queries live web search grounding (`gemini-3.8-flash` with `googleSearch`) alongside community Witness Intelligence to gather real people's experiences, scam warnings, and public review sentiment from across the internet, integrating those findings into both the descriptive Case Report and the community corroboration signals.
 
 ---
 
 ## 1. Overview & Core Concept
 
 - **What It Does**:
-  1. **Transparent Forensic Math**: Ensures every point in the Suspicion Index dial is visibly accounted for in the category breakdown, showing individual category contributions, active clue counts per category, override rules, and a final summation ledger row.
-  2. **Reliable Mobile Hero Video**: Fixes mobile browser power-saving and WebKit autoplay blocks so the Victorian detective study loop plays smoothly inline on mobile phones and tablets, including when navigating back to the Home view from other sections.
-  3. **Multi-Device Ergonomics**: Refines viewport spacing, responsive grids, horizontal table scrolling, and touch hitboxes across mobile, tablet, and desktop viewports.
-- **Target Audience / Persona**: Everyday mobile and desktop users inspecting suspicious links from SMS, WhatsApp, email, or QR codes who need clear visual proof of how a risk score was calculated and a smooth experience on any screen size.
-- **Key Value**: Eliminates confusion when comparing individual category bars against the overall Suspicion Index and ensures a fast, polished mobile-first experience.
+  1. **Strict Existence Gate (`NXDOMAIN` Check)**: Distinguishes between domains that do not exist at all (`domain_not_found`) and existing domains whose web servers are temporarily down (`unreachable`). Non-existent domains trigger an immediate error card with a direct GoDaddy verification button.
+  2. **Live Internet Asset Inspection**: Collects real technical asset data from DNS, RDAP/WHOIS, TLS port 443 handshakes, and HTTP/HTML responses, using those concrete signals to drive the deterministic Suspicion Index and displaying them in an inspectable **Live Internet Asset Footprint** ledger.
+  3. **Internet-Wide User Experience & Review Intelligence**: Uses server-side Google Search Grounding (`googleSearch`) to synthesize real users' experiences, public review sentiment, and scam reports found on the internet for the target domain, complete with clickable web source citations.
+- **Target Audience / Persona**: Everyday users, students, and security-conscious investigators verifying unfamiliar links who need factual, evidence-backed rankings grounded in real internet infrastructure and real human experiences.
+- **Key Value**: Eliminates false scores on non-existent domains, provides instant GoDaddy domain existence verification, and enriches every valid domain's Case Report with real technical asset telemetry and internet-wide user experience evidence.
 
 ---
 
 ## 2. User Experience & Visual Design
 
 - **Key User Flows**:
-  1. **Mobile Arrival & Hero Video Experience**: When a user opens SHERLOCK on a smartphone or tablet, the hero detective video plays inline immediately above and behind the investigation card without requiring fullscreen mode or manual unmuting, and resumes automatically if the user switches sections and returns home.
-  2. **Inspecting the Score Breakdown**: After investigating a URL, the user scrolls to **Deterministic Score Breakdown by Category**. Each category row shows its earned points (`+X / Max pts`), the number of triggered clues, and a color-coded progress bar. At the bottom of the breakdown, a dedicated **Forensic Tally Ledger** row shows:
-     - **Raw Category Points Sum** (e.g., `87 pts` or raw sum prior to cap)
-     - **Special Rule Adjustments** (if a Reputation Override `≥ 90` or 100-point cap applies)
-     - **Final Suspicion Index** (`87 / 100`) matching the top verdict dial 1:1.
-  3. **Cross-Device Navigation & Reading**: On mobile phones (`375px–430px`), complex forensic comparison tables, evaluation matrices, and case headers stack cleanly or provide smooth horizontal scroll containers without clipping or horizontal page overflow.
+  1. **Investigating a Non-Existent Domain (e.g., an unregistered or mistyped domain)**:
+     - The user submits a link in the Hero Investigation Desk.
+     - SHERLOCK performs a live DNS & registry existence check. Upon detecting `ENOTFOUND` / `NXDOMAIN`, the progress stream stops immediately and renders the **Website Does Not Exist** alert card.
+     - The card clearly states that the domain is not registered or has no DNS records on the internet, and provides a primary **"Verify Domain on GoDaddy"** button (`target="_blank" rel="noopener noreferrer"`) plus a secondary **"GoDaddy WHOIS Lookup"** button.
+  2. **Investigating a Live Internet Website**:
+     - All 8 forensic check stages run against live internet infrastructure (DNS, Impersonation rules, RDAP WHOIS, Threat Feeds, HTTP Redirects & HTML DOM, TLS X.509 Certificate, Security Headers, and Public Web Experience + Witness Intelligence).
+     - The resulting Case Dossier displays:
+       - **Suspicion Index & Deterministic Category Breakdown**: Driven by real findings and reconciled with the Forensic Score Calculation Tally.
+       - **Sherlock's Deduction**: Plain-English synthesis incorporating both technical asset clues and real-world user experiences found on the internet.
+       - **Live Internet Asset Footprint Panel**: Clean tabular ledger showing Resolved IPs, Registrar & Registration Date, TLS Issuer & Validity Dates, HTTP Status & Redirect Hops, and Page Title / Form Analysis.
+       - **Public Internet Experience & Web Reviews Panel**: Summarizes how people across the internet describe their experience with the domain (e.g., established institution, widespread phishing complaints, delivery scam reports, or mixed consumer reviews), accompanied by verified source links and local Witness Intelligence reports.
 - **Visual Identity & Theme**:
-  - *Aesthetic Direction*: Warm Victorian Detective Study meets modern defensive security dossier.
-  - *Color Palette & Mood*: Deep walnut (`#170E0B`, `#2A1A14`), oxblood (`#5A1F26`), antique brass (`#C9A04A`, `#F5CE7A`), warm parchment (`#F2E6C9`), and semantic severity accents (`#5E8B5A` low, `#D9A93A` caution, `#D9702E` high, `#B3342F` critical).
-  - *Typography & Hierarchy*: `Cormorant Garamond` for display headings, `Source Serif 4` for readable body prose, and `IBM Plex Mono` (`tabular-nums`) for aligned score columns and point tallies.
-- **Interactive Feedback & Motion**:
-  - Clicking or tapping a category row with active points smoothly highlights or filters the matching clues.
-  - All touch buttons maintain a minimum `44px × 44px` hit target with instant press feedback (`≤ 150ms`).
+  - Preserves the **221B Digital Detective Study** palette (`--walnut-900: #170E0B`, `--walnut-800: #2A1A14`, `--parchment-100: #F2E6C9`, `--brass-500: #C9A04A`, `--oxblood-700: #5A1F26`).
+  - Uses `Fraunces` for editorial headers, `Plus Jakarta Sans` for readable prose, and `JetBrains Mono` (`tabular-nums`) for DNS IPs, RDAP timestamps, certificate serial/validity dates, and score tallies.
+  - Adheres to single-elevation card depth, clean unboxed metadata with typographic separators (`·`), and WCAG AA contrast across both Dark and Light study themes.
 
 ---
 
 ## 3. Key Product Decisions & Trade-Offs
 
-- **Decision 1: Explicit Total Tally Ledger + Override Row in Category Breakdown**
-  - *Chosen Approach*: Add a structured summary footer inside the breakdown card showing the exact arithmetic (`Category Points Sum` → `Override / Cap Adjustment` → `Final Suspicion Index / 100`), plus an explicit override row whenever a blocklist feed forces the score to `≥ 90`.
-  - *Why*: Category weights sum to a theoretical maximum of 118 points (clamped to 100) and reputation overrides can raise a low category sum to 90+. Showing both the raw sum and the final clamped/overridden score removes any perceived math bug while preserving the deterministic rule weights.
-  - *Alternatives Considered*: Rescaling all category weights to 100 was passed over because individual clue weights are calibrated by forensic severity.
-- **Decision 2: Always-Visible DOM Video Layer with Native Poster on Mobile**
-  - *Chosen Approach*: Remove `opacity-0` hiding on the `<video>` element and instead use the native `poster` image with direct source binding, React lifecycle re-initialization on section changes, and multi-event touch/scroll playback recovery.
-  - *Why*: Mobile Safari (iOS) and mobile Chrome aggressively pause `<video>` elements rendered with `opacity: 0`, preventing the `playing` event from ever firing. Keeping the video element visible in the compositor layer allows immediate hardware-accelerated inline playback.
+- **Decision 1: Distinguishing Non-Existent Domains (`domain_not_found`) from Offline Servers (`unreachable`)**
+  - *Chosen Approach*: Inspect Node.js DNS error codes (`ENOTFOUND`, `ENODATA`, `EBADNAME`) and verify against RDAP (`404 Not Found`) before running downstream checks. If the domain has no DNS records and no RDAP registration, classify it as `domain_not_found` and surface the GoDaddy verification action.
+  - *Why*: Users need to know immediately if a website does not exist at all versus if an existing domain's web server refused a connection. Redirecting/linking to GoDaddy gives users an authoritative registrar check in one click.
+- **Decision 2: Server-Side Google Search Grounding for Real User Experience Intelligence**
+  - *Chosen Approach*: Query `gemini-3.8-flash` on the backend with `tools: [{ googleSearch: {} }]` during live investigations to gather real public reviews, scam reports, and user experiences across the web, while keeping a strict 4.5-second timeout and deterministic fallback if offline.
+  - *Why*: Local community reports in a single app instance only cover sites reported inside that instance; combining local Witness Intelligence with Google Search Grounding surfaces real-world human experiences across the entire internet.
 
 ---
 
 ## 4. Technical Architecture & Data Strategy *(Technical Reference)*
 
-- **Architecture & Component Diagram**:
+### Architecture & Data Flow Diagram
 
 ```
-┌───────────────────────────────────────────────────────────────────────────┐
-│                        Responsive Application Shell                       │
-│  ┌─────────────────────────────────────────────────────────────────────┐  │
-│  │ Top Navigation Bar (Brand + Investigate CTA + 3-Line Slide Drawer)  │  │
-│  └──────────────────────────────────┬──────────────────────────────────┘  │
-│                                     ▼                                     │
-│  ┌─────────────────────────────────────────────────────────────────────┐  │
-│  │ Mobile & Desktop Hero Section                                       │  │
-│  │  ├─ Inline Autoplay Video Layer (Always-visible + Poster + Loop)    │  │
-│  │  ├─ Lifecycle & Touch/Scroll Unlock Controller (Re-runs on #home)   │  │
-│  │  └─ Responsive Parchment Investigation Card (Paste / URL / QR)      │  │
-│  └──────────────────────────────────┬──────────────────────────────────┘  │
-│                                     ▼                                     │
-│  ┌─────────────────────────────────────────────────────────────────────┐  │
-│  │ Deterministic Rule Engine & Case Report Dossier                     │  │
-│  │  ├─ 8 Category Breakdown Bars (Points, Max Weight, Matched Clues)   │  │
-│  │  ├─ Conditional Reputation Override Row (When Override ≥ 90 Active) │  │
-│  │  └─ Total Forensic Tally Row (Raw Sum + Cap/Override = Final Index) │  │
-│  └─────────────────────────────────────────────────────────────────────┘  │
-└───────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                     CLIENT: INVESTIGATION DESK & DOSSIER                     │
+│  ┌────────────────────────────────────────────────────────────────────────┐  │
+│  │ URL Input / QR Scanner  ──► POST /api/investigate (NDJSON Stream)      │  │
+│  └───────────────┬────────────────────────────────────────┬───────────────┘  │
+│                  │ If errorCode === 'domain_not_found'    │ If 'complete'    │
+│                  ▼                                        ▼                  │
+│  ┌───────────────────────────────────────┐ ┌──────────────────────────────┐  │
+│  │ "Website Does Not Exist" Error Card   │ │ Active Case Dossier View     │  │
+│  │ • Explains NXDOMAIN / Unregistered    │ │ • Suspicion Index & Tally    │  │
+│  │ • [Check Domain on GoDaddy] CTA       │ │ • Live Internet Assets Panel │  │
+│  │ • [GoDaddy WHOIS Lookup] Link         │ │ • Public Web Experience Card │  │
+│  └───────────────────────────────────────┘ └──────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                       ▲
+                                       │ NDJSON Events & Reconciled CaseReportData
+┌──────────────────────────────────────┴───────────────────────────────────────┐
+│                     SERVER: REAL INTERNET FORENSIC ENGINE                    │
+│                                                                              │
+│  1. DNS & Registry Existence Gate                                            │
+│     ├─ dns.lookup(host, { all: true }) + dns.resolveNs(registrable)          │
+│     └─ If ENOTFOUND / NXDOMAIN ──► Emit 'domain_not_found' + GoDaddy URLs    │
+│                                                                              │
+│  2. Parallel Real Internet Asset Collectors                                  │
+│     ├─ RDAP WHOIS Inspector: Registrar, Created/Expiry Dates, Domain Age     │
+│     ├─ TLS X.509 Inspector: Issuer, Subject SANs, ValidFrom/ValidTo, Age     │
+│     ├─ HTTP & HTML Inspector: Status, Redirect Chain, Title, Meta, Forms     │
+│     └─ Web Experience Grounding (gemini-3.8-flash + googleSearch):           │
+│        Extracts public user experience summary, sentiment & source URLs      │
+│                                                                              │
+│  3. Deterministic Scoring & Sherlock Deduction Synthesis                     │
+│     └─ Combines technical clues + corroborated web experience into 0–100     │
+│        Suspicion Index, Score Tally, and grounded plain-English Deduction    │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Data Model & State**:
-  - `CategoryBreakdown` entries track `category`, `label`, `points` (clamped per category), `rawPoints` (unclamped sum of clues in that category), `maxPoints`, and `clueCount` (number of triggered clues in that category).
-  - The Score Breakdown view computes `rawCategorySum` across all categories, checks `report.overrideTriggered` and `100`-point clamping, and renders the step-by-step arithmetic reconciliation in the Total Tally Row.
-- **Interactive Component & State Mapping**:
-  - **Hero Video Controller**: Re-binds whenever the active view switches to `home`, sets `muted`, `defaultMuted`, `playsInline`, and `webkit-playsinline` synchronously on mount, calls `.play()`, and attaches passive `touchstart`, `pointerdown`, and `scroll` listeners to recover playback if mobile Low Power Mode or Data Saver initially defers autoplay.
-  - **Score Breakdown Interactive Rows**: Displays triggered clue badges on each category row and renders the bottom **Total Suspicion Index Tally** bar matching `report.index`.
-  - **Responsive Viewport Layout**: Adjusts mobile hero height and scrim contrast so the video is clearly visible on phones, wraps wide forensic tables in touch-scrollable containers, and ensures all cards, modals, and footer sections adapt cleanly from `360px` to `1440px`.
+### Data Model & State Additions
+
+- **`SpecialStateType`**: Adds `'domain_not_found'` alongside `'blocked_url'`, `'rate_limited'`, `'unreachable'`, `'inconclusive'`, and `'partial_results'`.
+- **`InternetAssetFootprint` (attached to `CaseReportData.internetAssets`)**:
+  - `resolvedIps: string[]`
+  - `registrar: string | null`
+  - `registeredAt: string | null`
+  - `expiresAt: string | null`
+  - `domainAgeDays: number | null`
+  - `tlsIssuer: string | null`
+  - `tlsValidFrom: string | null`
+  - `tlsValidTo: string | null`
+  - `httpStatus: number | null`
+  - `serverHeader: string | null`
+  - `redirectChain: string[]`
+  - `pageTitle: string | null`
+  - `metaDescription: string | null`
+  - `formsDetected: number`
+  - `hasPasswordInput: boolean`
+  - `presentSecurityHeaders: string[]`
+  - `missingSecurityHeaders: string[]`
+- **`PublicWebExperience` (attached to `CaseReportData.webExperience`)**:
+  - `sentiment: 'positive' | 'mixed' | 'negative' | 'unverified'`
+  - `summary: string` (2–3 sentences summarizing real people's experiences and public reputation found on the internet)
+  - `highlights: string[]` (key user experience takeaways or reported warnings)
+  - `sources: Array<{ title: string; url: string }>` (verified web citations from Google Search grounding)
+
+### Interactive Component & State Mapping
+
+- **Non-Existent Domain Error Card (`App.tsx`)**:
+  - Renders when `specialStateError.state === 'domain_not_found'`.
+  - Displays the queried hostname, the exact DNS/registry reason, a primary **"Check Domain on GoDaddy"** button (`https://www.godaddy.com/domainsearch/find?domainToCheck=<host>`), a secondary **"GoDaddy WHOIS Lookup"** button (`https://www.godaddy.com/whois/results.aspx?domain=<host>`), and an **"Investigate a Different Link"** reset action.
+- **Live Internet Asset Footprint & Public Web Experience Sections (`CaseReportView.tsx`)**:
+  - Displays the real technical infrastructure profile and the internet-wide user experience summary with clickable external source citations and GoDaddy WHOIS verification link on every Case Report.
