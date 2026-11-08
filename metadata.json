@@ -1,6 +1,6 @@
 {
   "name": "SHERLOCK — The AI Digital Detective",
-  "description": "Inspect suspicious URLs, QR codes, DNS, WHOIS domain age, SSL certificates, and scam reports with SHERLOCK's forensic phishing link checker & safety scanner.",
+  "description": "Investigate before you trust. Every website leaves clues. SHERLOCK finds them through deterministic forensic checks, witness intelligence, and plain-English deductions.",
   "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

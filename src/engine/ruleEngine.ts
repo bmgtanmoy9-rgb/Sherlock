@@ -637,17 +637,6 @@ export function computeSuspicionScore(
   };
 }
 
-export function buildGoDaddyUrls(host: string): {
-  godaddyCheckUrl: string;
-  godaddyWhoisUrl: string;
-} {
-  const cleanHost = host.trim().toLowerCase().replace(/^www\./, '');
-  return {
-    godaddyCheckUrl: `https://www.godaddy.com/domainsearch/find?domainToCheck=${encodeURIComponent(cleanHost)}`,
-    godaddyWhoisUrl: `https://www.godaddy.com/whois/results.aspx?domain=${encodeURIComponent(cleanHost)}`,
-  };
-}
-
 /**
  * Ensures any CaseReportData object (including cached or stored records) has
  * a freshly reconciled categoryBreakdown and scoreTally summary.
@@ -658,7 +647,6 @@ export function reconcileCaseReport(report: CaseReportData): CaseReportData {
     report.checkStatuses,
     report.hasValidHttps
   );
-  const urls = buildGoDaddyUrls(report.host);
   return {
     ...report,
     index: report.specialState === 'inconclusive' ? null : scored.index,
@@ -666,13 +654,6 @@ export function reconcileCaseReport(report: CaseReportData): CaseReportData {
     categoryBreakdown: scored.categoryBreakdown,
     scoreTally: scored.scoreTally,
     overrideTriggered: scored.overrideTriggered,
-    internetAssets: report.internetAssets
-      ? {
-          ...report.internetAssets,
-          godaddyCheckUrl: report.internetAssets.godaddyCheckUrl || urls.godaddyCheckUrl,
-          godaddyWhoisUrl: report.internetAssets.godaddyWhoisUrl || urls.godaddyWhoisUrl,
-        }
-      : undefined,
   };
 }
 
@@ -918,47 +899,6 @@ export function getWorkedExampleCaseReport(): CaseReportData {
       firstReported: '2026-11-03T11:20:00.000Z',
       lastReported: '2026-11-07T19:05:00.000Z',
       corroborated: true,
-    },
-    internetAssets: {
-      resolvedIps: ['198.51.100.44'],
-      registrar: 'NameSilo, LLC (Synthetic Demo Registry)',
-      registeredAt: '2026-11-02T09:14:00.000Z',
-      expiresAt: '2027-11-02T09:14:00.000Z',
-      domainAgeDays: 6,
-      tlsIssuer: "Let's Encrypt (R3 DV Automated)",
-      tlsSubject: 'paypa1-secure-login.example',
-      tlsValidFrom: '2026-11-03T00:00:00.000Z',
-      tlsValidTo: '2027-02-01T23:59:59.000Z',
-      tlsProtocol: 'TLSv1.3',
-      httpStatus: 200,
-      serverHeader: 'nginx',
-      redirectChain: [
-        'https://paypa1-secure-login.example/verify',
-        'https://auth-session-gate.example/login',
-      ],
-      pageTitle: 'PayPal: Confirm Your Identity & Security Key',
-      metaDescription: 'Please sign in to restore full access to your wallet.',
-      formsDetected: 1,
-      hasPasswordInput: true,
-      presentSecurityHeaders: ['X-Content-Type-Options'],
-      missingSecurityHeaders: ['HSTS', 'CSP', 'X-Frame-Options', 'Referrer-Policy'],
-      ...buildGoDaddyUrls('paypa1-secure-login.example'),
-    },
-    webExperience: {
-      sentiment: 'negative',
-      summary:
-        'Public user reports and security forums flag this lookalike address as an SMS and email credential-harvesting lure that substitutes the number "1" for the letter "l" in PayPal.',
-      highlights: [
-        'Multiple users report receiving urgent "account restricted" SMS links pointing to this domain.',
-        'Domain registration is only 6 days old despite displaying official payment brand logos.',
-        'Login form transmits credentials to an external collection server.',
-      ],
-      sources: [
-        {
-          title: 'PayPal Official Security Center — Recognizing Phishing Links',
-          url: 'https://www.paypal.com/us/security/learn/phishing',
-        },
-      ],
     },
     checkStatuses,
     specialState: 'none',
