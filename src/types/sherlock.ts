@@ -137,6 +137,11 @@ export type SpecialStateType =
   | 'rate_limited'
   | 'partial_results';
 
+export interface StageTimingInfo {
+  durationMs: number;
+  detail?: string;
+}
+
 export interface CaseReportData {
   id: string;
   host: string;
@@ -153,6 +158,7 @@ export interface CaseReportData {
   internetAssets?: InternetAssetFootprint;
   webExperience?: PublicWebExperience;
   inspectionDurationMs?: number;
+  stageTimings?: Partial<Record<CheckStageId, StageTimingInfo>>;
   checkStatuses: Record<CheckStageId, CheckStatus>;
   specialState: SpecialStateType;
   specialMessage?: string;
@@ -165,6 +171,7 @@ export interface CheckProgressEvent {
   type: 'stage' | 'complete' | 'error';
   stage?: CheckStageId;
   status?: CheckStatus;
+  durationMs?: number;
   detail?: string;
   report?: CaseReportData;
   errorCode?: SpecialStateType;

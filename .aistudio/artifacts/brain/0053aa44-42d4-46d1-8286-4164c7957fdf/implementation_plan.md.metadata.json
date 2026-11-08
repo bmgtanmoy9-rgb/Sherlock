@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan to permanently eliminate the Vite WebSocket connection error (`Error: WebSocket closed without opened.`) in the preview environment by intercepting `/@vite/client` with a safe ESM stub, attaching the Node HTTP server instance, and installing an early `<head>` WebSocket & rejection shield.",
-  "updatedAt":  "2026-11-08T22:01:12.388561229Z",
+  "summary":  "Implementation plan to make the Forensic Check Ledger ultra-responsive across all devices (mobile, tablet, and desktop) in a 2 to 3 second balanced mode with immediate auto-scroll, anti-buffering NDJSON streaming, live millisecond stage timings, and unified single-wave parallel execution.",
+  "updatedAt":  "2026-11-08T22:14:00.978625313Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

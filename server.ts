@@ -19,6 +19,7 @@ import type {
   InternetAssetFootprint,
   PublicWebExperience,
   SherlockDeduction,
+  StageTimingInfo,
   WitnessCategory,
   WitnessReportEntry,
 } from './src/types/sherlock.ts';
@@ -398,7 +399,7 @@ async function verifyHostDnsSafe(host: string): Promise<{
     const records = await Promise.race([
       dns.lookup(host, { all: true, verbatim: true }),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('DNS_TIMEOUT')), 1200)
+        setTimeout(() => reject(new Error('DNS_TIMEOUT')), 900)
       ),
     ]);
 
@@ -443,7 +444,7 @@ async function verifyHostDnsSafe(host: string): Promise<{
       try {
         const nsRecords = await Promise.race([
           dns.resolveNs(registrable),
-          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('NS_TIMEOUT')), 650)),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('NS_TIMEOUT')), 400)),
         ]);
         if (!nsRecords || nsRecords.length === 0) {
           return {
@@ -479,8 +480,31 @@ async function verifyHostDnsSafe(host: string): Promise<{
   }
 }
 
+function getDirectRdapUrl(registrable: string): string {
+  const lower = registrable.toLowerCase();
+  const parts = lower.split('.');
+  const tld = parts[parts.length - 1] || '';
+  const enc = encodeURIComponent(lower);
+  if (tld === 'com' || tld === 'net') {
+    return `https://rdap.verisign.com/${tld}/v1/domain/${enc}`;
+  }
+  if (tld === 'org') {
+    return `https://rdap.publicinterestregistry.org/rdap/domain/${enc}`;
+  }
+  if (tld === 'uk') {
+    return `https://rdap.nominet.uk/uk/domain/${enc}`;
+  }
+  if (['io', 'me', 'co', 'info', 'biz', 'mobi', 'pro'].includes(tld)) {
+    return `https://rdap.identitydigital.services/rdap/domain/${enc}`;
+  }
+  if (['xyz', 'top', 'online', 'site', 'shop', 'icu', 'store', 'tech'].includes(tld)) {
+    return `https://rdap.centralnic.com/${tld}/domain/${enc}`;
+  }
+  return `https://rdap.org/domain/${enc}`;
+}
+
 /**
- * Check 3: Fast RDAP WHOIS Domain Age & Registrar Inspector (1.8s timeout)
+ * Check 3: Fast Direct RDAP WHOIS Domain Age & Registrar Inspector (1.35s timeout)
  */
 async function checkDomainAge(host: string): Promise<{
   clues: Clue[];
@@ -528,9 +552,10 @@ async function checkDomainAge(host: string): Promise<{
   }
 
   try {
-    const res = await fetch(`https://rdap.org/domain/${encodeURIComponent(registrable)}`, {
+    const rdapUrl = getDirectRdapUrl(registrable);
+    const res = await fetch(rdapUrl, {
       headers: { Accept: 'application/rdap+json, application/json', 'User-Agent': USER_AGENT },
-      signal: AbortSignal.timeout(1800),
+      signal: AbortSignal.timeout(1350),
     });
 
     if (res.status === 404) {
@@ -542,7 +567,7 @@ async function checkDomainAge(host: string): Promise<{
         severity: 'low',
         explanation:
           'Some country-code registries do not publish creation dates over public RDAP, which adds a small uncertainty penalty.',
-        howChecked: 'Queried https://rdap.org/domain/ with a 1.8-second timeout.',
+        howChecked: 'Queried authoritative RDAP server with a 1.35-second timeout.',
         points: 3,
         category: 'domain_age',
       });
@@ -841,7 +866,7 @@ async function inspectRedirectsPageAndHeaders(
   let crossDomainRedirects = 0;
   let finalResponse: globalThis.Response | null = null;
   const startMs = Date.now();
-  const TOTAL_HTTP_BUDGET_MS = 2000;
+  const TOTAL_HTTP_BUDGET_MS = 1450;
 
   try {
     for (let hop = 0; hop <= 5; hop++) {
@@ -854,7 +879,7 @@ async function inspectRedirectsPageAndHeaders(
       }
 
       const elapsed = Date.now() - startMs;
-      const hopBudget = Math.max(450, TOTAL_HTTP_BUDGET_MS - elapsed);
+      const hopBudget = Math.max(380, TOTAL_HTTP_BUDGET_MS - elapsed);
 
       const res = await fetch(currentUrl, {
         method: 'GET',
@@ -1034,12 +1059,12 @@ async function inspectRedirectsPageAndHeaders(
       const chunks: Uint8Array[] = [];
       let received = 0;
       const MAX_BYTES = 128 * 1024;
-      const bodyDeadline = Date.now() + 550;
+      const bodyDeadline = Date.now() + 350;
       while (received < MAX_BYTES && Date.now() < bodyDeadline) {
         const { done, value } = await Promise.race([
           reader.read(),
           new Promise<{ done: true; value: undefined }>((r) =>
-            setTimeout(() => r({ done: true, value: undefined }), 450)
+            setTimeout(() => r({ done: true, value: undefined }), 320)
           ),
         ]);
         if (done || !value) break;
@@ -1192,7 +1217,7 @@ async function inspectTlsCertificate(
         port: 443,
         servername: host,
         rejectUnauthorized: false,
-        timeout: 1600,
+        timeout: 1200,
       },
       () => {
         try {
@@ -1426,7 +1451,7 @@ HIGHLIGHTS: [Highlight 1] | [Highlight 2]`,
         },
       }),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Web experience grounding timeout')), 2100)
+        setTimeout(() => reject(new Error('Web experience grounding timeout')), 1750)
       ),
     ]);
 
@@ -1523,7 +1548,7 @@ HIGHLIGHTS: [Highlight 1] | [Highlight 2]`,
 
 /**
  * Generates Sherlock's Deduction using server-side @google/genai (gemini-3.8-flash with ThinkingLevel.LOW).
- * Bounded by remainingBudgetMs so total investigation time always stays within 3 to 5 seconds.
+ * Bounded by remainingBudgetMs so total investigation time always stays within 2 to 3 seconds.
  */
 async function generateSherlockDeduction(
   host: string,
@@ -1534,15 +1559,47 @@ async function generateSherlockDeduction(
   hasValidHttps: boolean,
   internetAssets?: InternetAssetFootprint,
   webExperience?: PublicWebExperience,
-  remainingBudgetMs = 1300
+  remainingBudgetMs = 800
 ): Promise<SherlockDeduction> {
   const fallback = buildTemplateDeduction(host, level, confidence, clues, hasValidHttps);
-  if (webExperience?.summary && fallback.keyReasons.length < 3) {
-    fallback.keyReasons.push(`Public web experience: ${webExperience.summary}`);
+
+  // Enrich deterministic fallback with real internet asset footprint & public web experience
+  const assetDetails: string[] = [];
+  if (internetAssets) {
+    if (internetAssets.domainAgeDays !== null) {
+      assetDetails.push(
+        `Domain age: ${internetAssets.domainAgeDays.toLocaleString()} days${
+          internetAssets.registrar ? ` (Registrar: ${internetAssets.registrar})` : ''
+        }`
+      );
+    } else if (internetAssets.registrar) {
+      assetDetails.push(`Registrar: ${internetAssets.registrar}`);
+    }
+    if (internetAssets.tlsIssuer) {
+      assetDetails.push(`TLS certificate: ${internetAssets.tlsIssuer}`);
+    }
+    if (internetAssets.httpStatus) {
+      assetDetails.push(
+        `HTTP ${internetAssets.httpStatus}${
+          internetAssets.pageTitle ? ` ("${internetAssets.pageTitle.slice(0, 45)}")` : ''
+        }`
+      );
+    }
+  }
+  if (assetDetails.length > 0 && fallback.keyReasons.length < 3) {
+    fallback.keyReasons.push(`Live internet assets verified: ${assetDetails.join(' · ')}.`);
+  }
+  if (webExperience?.summary) {
+    if (fallback.keyReasons.length < 3) {
+      fallback.keyReasons.push(`Public web experience: ${webExperience.summary}`);
+    }
+    if (!fallback.text.includes(webExperience.summary.slice(0, 28))) {
+      fallback.text = `${fallback.text} ${webExperience.summary}`;
+    }
   }
 
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY' || level === 'inconclusive' || remainingBudgetMs < 500) {
+  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY' || level === 'inconclusive' || remainingBudgetMs < 650) {
     return fallback;
   }
 
@@ -1842,12 +1899,30 @@ async function startServer() {
     const forceDemo = typeof req.body?.demoKey === 'string' ? req.body.demoKey : '';
     const clientHash = getClientHash(req);
 
+    // Anti-buffering headers so cloud proxies flush every NDJSON stage event immediately on mobile & desktop
     res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Cache-Control', 'no-cache, no-store, no-transform');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.setHeader('Content-Encoding', 'identity');
+    res.flushHeaders();
+
+    const stageTimings: Partial<Record<CheckStageId, StageTimingInfo>> = {};
 
     const sendEvent = (event: CheckProgressEvent) => {
-      res.write(`${JSON.stringify(event)}\n`);
+      if (event.type === 'stage' && event.stage && event.durationMs !== undefined) {
+        stageTimings[event.stage] = {
+          durationMs: event.durationMs,
+          detail: event.detail,
+        };
+      }
+      // Pad stage events so reverse proxies flush each chunk immediately without waiting for 4KB buffer
+      const padding = event.type === 'stage' ? ' '.repeat(512) : '';
+      res.write(`${JSON.stringify(event)}${padding}\n`);
+      const flushable = res as unknown as { flush?: () => void };
+      if (typeof flushable.flush === 'function') {
+        flushable.flush();
+      }
     };
 
     // Rate-limit check (plus special demo trigger for rate-limited state)
@@ -1881,6 +1956,53 @@ async function startServer() {
     // Check if this matches one of the 3 curated demo cases
     const demoPresetFn = DEMO_PRESETS[forceDemo] || DEMO_PRESETS[host];
     if (demoPresetFn) {
+      const demoBase = demoPresetFn();
+      const demoDetails: Record<CheckStageId, { ms: number; detail: string }> = {
+        domain_identity: {
+          ms: 18,
+          detail: demoBase.internetAssets?.resolvedIps?.[0]
+            ? `DNS verified (${demoBase.internetAssets.resolvedIps[0]})`
+            : 'Hostname & DNS structure verified',
+        },
+        impersonation: {
+          ms: 24,
+          detail:
+            demoBase.clues.some((c) => c.category === 'impersonation' && c.points > 0)
+              ? 'Lookalike brand pattern flagged'
+              : 'No lookalike brand spoofing',
+        },
+        domain_age: {
+          ms: 145,
+          detail:
+            demoBase.internetAssets?.domainAgeDays != null
+              ? `${demoBase.internetAssets.domainAgeDays.toLocaleString()}d old · ${demoBase.internetAssets.registrar || 'RDAP'}`
+              : 'RDAP registry inspected',
+        },
+        reputation: {
+          ms: 92,
+          detail: 'OpenPhish, URLhaus & PhishTank checked',
+        },
+        redirects_page: {
+          ms: 180,
+          detail: demoBase.internetAssets?.httpStatus
+            ? `HTTP ${demoBase.internetAssets.httpStatus} · ${demoBase.internetAssets.formsDetected || 0} form(s)`
+            : 'HTML & redirect hops inspected',
+        },
+        certificate: {
+          ms: 130,
+          detail: demoBase.internetAssets?.tlsIssuer
+            ? `TLS X.509 · ${demoBase.internetAssets.tlsIssuer}`
+            : 'TLS port 443 inspected',
+        },
+        security_posture: {
+          ms: 185,
+          detail: `${demoBase.internetAssets?.presentSecurityHeaders?.length || 0}/4 defensive headers active`,
+        },
+        witness: {
+          ms: 210,
+          detail: `${demoBase.witness.totalReports} local report(s) · Web sentiment: ${demoBase.webExperience?.sentiment || 'verified'}`,
+        },
+      };
       const stages: CheckStageId[] = [
         'domain_identity',
         'impersonation',
@@ -1893,11 +2015,20 @@ async function startServer() {
       ];
       for (const stage of stages) {
         sendEvent({ type: 'stage', stage, status: 'running' });
-        await new Promise((r) => setTimeout(r, 35));
-        sendEvent({ type: 'stage', stage, status: 'done' });
+      }
+      for (const stage of stages) {
+        await new Promise((r) => setTimeout(r, 22));
+        sendEvent({
+          type: 'stage',
+          stage,
+          status: 'done',
+          durationMs: demoDetails[stage].ms,
+          detail: demoDetails[stage].detail,
+        });
       }
       const demoReport = reconcileCaseReport({
-        ...demoPresetFn(),
+        ...demoBase,
+        stageTimings,
         inspectionDurationMs: Date.now() - investigationStartMs,
       });
       store.cases[demoReport.id] = demoReport;
@@ -1909,10 +2040,10 @@ async function startServer() {
 
     // Special state test triggers (so evaluators can preview every special state easily)
     if (host === 'unreachable-test.example') {
-      sendEvent({ type: 'stage', stage: 'domain_identity', status: 'done' });
-      sendEvent({ type: 'stage', stage: 'impersonation', status: 'done' });
-      sendEvent({ type: 'stage', stage: 'redirects_page', status: 'failed' });
-      sendEvent({ type: 'stage', stage: 'certificate', status: 'failed' });
+      sendEvent({ type: 'stage', stage: 'domain_identity', status: 'done', durationMs: 14, detail: 'Hostname syntax parsed' });
+      sendEvent({ type: 'stage', stage: 'impersonation', status: 'done', durationMs: 19, detail: 'Brand dictionary compared' });
+      sendEvent({ type: 'stage', stage: 'redirects_page', status: 'failed', durationMs: 420, detail: 'Connection refused' });
+      sendEvent({ type: 'stage', stage: 'certificate', status: 'failed', durationMs: 420, detail: 'No TLS response' });
       sendEvent({
         type: 'error',
         errorCode: 'domain_not_found',
@@ -1939,8 +2070,14 @@ async function startServer() {
         'witness',
       ];
       for (const stage of stages) {
-        sendEvent({ type: 'stage', stage, status: cached.report.checkStatuses[stage] || 'done' });
-        await new Promise((r) => setTimeout(r, 20));
+        const prevTiming = cached.report.stageTimings?.[stage];
+        sendEvent({
+          type: 'stage',
+          stage,
+          status: cached.report.checkStatuses[stage] || 'done',
+          durationMs: prevTiming?.durationMs ?? 35,
+          detail: prevTiming?.detail ?? 'Verified from active forensic cache',
+        });
       }
       sendEvent({
         type: 'complete',
@@ -1953,86 +2090,62 @@ async function startServer() {
       return;
     }
 
-    // Fast DNS & Existence Gate (<= 1.2s): Verifies domain actually exists on the internet and is SSRF-safe
-    sendEvent({ type: 'stage', stage: 'domain_identity', status: 'running' });
-    const dnsSafety = await verifyHostDnsSafe(host);
-
-    if (!dnsSafety.safe && !host.endsWith('.example')) {
-      if (dnsSafety.ssrfBlocked || dnsSafety.reason?.includes('SSRF')) {
-        sendEvent({ type: 'stage', stage: 'domain_identity', status: 'failed' });
-        sendEvent({
-          type: 'error',
-          errorCode: 'blocked_url',
-          targetHost: host,
-          message: dnsSafety.reason || 'Blocked internal or reserved network address.',
-        });
-        res.end();
-        return;
-      }
-
-      if (dnsSafety.domainNotFound) {
-        sendEvent({ type: 'stage', stage: 'domain_identity', status: 'failed' });
-        sendEvent({ type: 'stage', stage: 'domain_age', status: 'failed' });
-        sendEvent({ type: 'stage', stage: 'redirects_page', status: 'failed' });
-        sendEvent({ type: 'stage', stage: 'certificate', status: 'failed' });
-        sendEvent({
-          type: 'error',
-          errorCode: 'domain_not_found',
-          targetHost: host,
-          godaddyUrl: godaddyCheckUrl,
-          godaddyWhoisUrl,
-          message:
-            dnsSafety.reason ||
-            `The website "${host}" does not exist on the internet (NXDOMAIN — domain is unregistered or has no active DNS records). Use GoDaddy below to verify if "${registrable}" really exists or is available.`,
-        });
-        res.end();
-        return;
-      }
-    }
-
     const checkStatuses: Record<CheckStageId, CheckStatus> = {
-      domain_identity: 'pending',
-      impersonation: 'pending',
-      domain_age: 'pending',
-      reputation: 'pending',
-      redirects_page: 'pending',
-      certificate: 'pending',
-      security_posture: 'pending',
-      witness: 'pending',
+      domain_identity: 'running',
+      impersonation: 'running',
+      domain_age: 'running',
+      reputation: 'running',
+      redirects_page: 'running',
+      certificate: 'running',
+      security_posture: 'running',
+      witness: 'running',
     };
+
+    const allStages: CheckStageId[] = [
+      'domain_identity',
+      'impersonation',
+      'domain_age',
+      'reputation',
+      'redirects_page',
+      'certificate',
+      'security_posture',
+      'witness',
+    ];
+
+    // Immediately broadcast all 8 checks as 'running' at t = 0ms so the Forensic Check Ledger lights up instantly
+    for (const st of allStages) {
+      sendEvent({ type: 'stage', stage: st, status: 'running' });
+    }
 
     const allClues: Clue[] = [];
     let hasValidHttps = true;
 
-    // 1. Domain Identity Check + Real DNS Resolution Record
-    const idClues = inspectDomainIdentity(host, sanitizedUrl, hadAtSymbol, originalLength);
-    allClues.push(...idClues);
-    if (dnsSafety.resolvedIps.length > 0 && idClues.length === 0) {
-      allClues.push({
-        id: 'id-dns-verified',
-        code: 'CLUE-ID-00',
-        name: `Active public DNS record verified (${dnsSafety.resolvedIps.slice(0, 2).join(', ')})`,
-        finding: `${host} resolves on public DNS to ${dnsSafety.resolvedIps.slice(0, 3).join(', ')} with standard hostname structure.`,
-        severity: 'info',
-        explanation:
-          'Active DNS resolution confirms the domain is live on the internet without obfuscated IP encoding or deceptive @-credentials.',
-        howChecked: 'Resolved authoritative A/AAAA records and inspected hostname syntax.',
-        points: 0,
-        category: 'url_structure',
-      });
-    }
-    checkStatuses.domain_identity = 'done';
-    sendEvent({ type: 'stage', stage: 'domain_identity', status: 'done' });
-
-    // 2. Impersonation Check
-    sendEvent({ type: 'stage', stage: 'impersonation', status: 'running' });
+    // Stage 2: Impersonation Check (completes in < 10ms)
+    const impStartMs = Date.now();
     const impClues = inspectImpersonation(host);
     allClues.push(...impClues);
     checkStatuses.impersonation = 'done';
-    sendEvent({ type: 'stage', stage: 'impersonation', status: 'done' });
+    sendEvent({
+      type: 'stage',
+      stage: 'impersonation',
+      status: 'done',
+      durationMs: Math.max(8, Date.now() - impStartMs),
+      detail:
+        impClues.length > 0
+          ? `${impClues.length} brand impersonation clue(s) flagged`
+          : `Checked against ${PROTECTED_BRANDS.length} protected brands`,
+    });
 
     // Handle special inconclusive test trigger
     if (host === 'inconclusive-test.example') {
+      checkStatuses.domain_identity = 'done';
+      sendEvent({
+        type: 'stage',
+        stage: 'domain_identity',
+        status: 'done',
+        durationMs: 15,
+        detail: 'Hostname syntax inspected',
+      });
       const timedOutStages: CheckStageId[] = [
         'domain_age',
         'reputation',
@@ -2042,10 +2155,10 @@ async function startServer() {
       ];
       for (const st of timedOutStages) {
         checkStatuses[st] = 'timed_out';
-        sendEvent({ type: 'stage', stage: st, status: 'timed_out' });
+        sendEvent({ type: 'stage', stage: st, status: 'timed_out', durationMs: 1200, detail: 'Check timed out' });
       }
       checkStatuses.witness = 'done';
-      sendEvent({ type: 'stage', stage: 'witness', status: 'done' });
+      sendEvent({ type: 'stage', stage: 'witness', status: 'done', durationMs: 45, detail: 'Witness ledger checked' });
 
       const scored = computeSuspicionScore(allClues, checkStatuses, false);
       const deduction = buildTemplateDeduction(host, 'inconclusive', 'low', allClues, false);
@@ -2062,6 +2175,7 @@ async function startServer() {
         scoreTally: scored.scoreTally,
         deduction,
         witness: buildWitnessSummaryForHost(host, store.reports, false),
+        stageTimings,
         inspectionDurationMs: Date.now() - investigationStartMs,
         checkStatuses,
         specialState: 'inconclusive',
@@ -2076,18 +2190,101 @@ async function startServer() {
       return;
     }
 
-    // Run all network-bound real-asset checks AND public web experience grounding in parallel (<= 2.0s wave)
-    const stagesToStart: CheckStageId[] = [
-      'domain_age',
-      'reputation',
-      'redirects_page',
-      'certificate',
-      'security_posture',
-      'witness',
-    ];
-    for (const st of stagesToStart) {
-      sendEvent({ type: 'stage', stage: st, status: 'running' });
+    // Fast DNS & Existence Gate (<= 900ms): Verifies domain actually exists on the internet and is SSRF-safe
+    const dnsStartMs = Date.now();
+    const idClues = inspectDomainIdentity(host, sanitizedUrl, hadAtSymbol, originalLength);
+    allClues.push(...idClues);
+    const dnsSafety = await verifyHostDnsSafe(host);
+
+    if (!dnsSafety.safe && !host.endsWith('.example')) {
+      const dnsElapsed = Math.max(12, Date.now() - dnsStartMs);
+      if (dnsSafety.ssrfBlocked || dnsSafety.reason?.includes('SSRF')) {
+        sendEvent({
+          type: 'stage',
+          stage: 'domain_identity',
+          status: 'failed',
+          durationMs: dnsElapsed,
+          detail: 'Blocked by SSRF IP guard',
+        });
+        sendEvent({
+          type: 'error',
+          errorCode: 'blocked_url',
+          targetHost: host,
+          message: dnsSafety.reason || 'Blocked internal or reserved network address.',
+        });
+        res.end();
+        return;
+      }
+
+      if (dnsSafety.domainNotFound) {
+        sendEvent({
+          type: 'stage',
+          stage: 'domain_identity',
+          status: 'failed',
+          durationMs: dnsElapsed,
+          detail: 'NXDOMAIN — No DNS records found',
+        });
+        sendEvent({
+          type: 'stage',
+          stage: 'domain_age',
+          status: 'failed',
+          durationMs: dnsElapsed,
+          detail: 'Domain unregistered',
+        });
+        sendEvent({
+          type: 'stage',
+          stage: 'redirects_page',
+          status: 'failed',
+          durationMs: dnsElapsed,
+          detail: 'Host unreachable',
+        });
+        sendEvent({
+          type: 'stage',
+          stage: 'certificate',
+          status: 'failed',
+          durationMs: dnsElapsed,
+          detail: 'No TLS endpoint',
+        });
+        sendEvent({
+          type: 'error',
+          errorCode: 'domain_not_found',
+          targetHost: host,
+          godaddyUrl: godaddyCheckUrl,
+          godaddyWhoisUrl,
+          message:
+            dnsSafety.reason ||
+            `The website "${host}" does not exist on the internet (NXDOMAIN — domain is unregistered or has no active DNS records). Use GoDaddy below to verify if "${registrable}" really exists or is available.`,
+        });
+        res.end();
+        return;
+      }
     }
+
+    if (dnsSafety.resolvedIps.length > 0 && idClues.length === 0) {
+      allClues.push({
+        id: 'id-dns-verified',
+        code: 'CLUE-ID-00',
+        name: `Active public DNS record verified (${dnsSafety.resolvedIps.slice(0, 2).join(', ')})`,
+        finding: `${host} resolves on public DNS to ${dnsSafety.resolvedIps.slice(0, 3).join(', ')} with standard hostname structure.`,
+        severity: 'info',
+        explanation:
+          'Active DNS resolution confirms the domain is live on the internet without obfuscated IP encoding or deceptive @-credentials.',
+        howChecked: 'Resolved authoritative A/AAAA records and inspected hostname syntax.',
+        points: 0,
+        category: 'url_structure',
+      });
+    }
+    checkStatuses.domain_identity = 'done';
+    sendEvent({
+      type: 'stage',
+      stage: 'domain_identity',
+      status: 'done',
+      durationMs: Math.max(12, Date.now() - dnsStartMs),
+      detail:
+        dnsSafety.resolvedIps.length > 0
+          ? `Resolved ${dnsSafety.resolvedIps.slice(0, 2).join(', ')}`
+          : 'Hostname & lexical structure verified',
+    });
 
     let registrar: string | null = null;
     let registeredAt: string | null = null;
@@ -2113,6 +2310,8 @@ async function startServer() {
 
     let webExperienceData: PublicWebExperience | undefined;
 
+    const parallelWaveStartMs = Date.now();
+
     const ageTask = checkDomainAge(host)
       .then((resAge) => {
         allClues.push(...resAge.clues);
@@ -2122,22 +2321,55 @@ async function startServer() {
         domainAgeDays = resAge.domainAgeDays;
         rdapNotFound = resAge.rdapNotFound;
         checkStatuses.domain_age = 'done';
-        sendEvent({ type: 'stage', stage: 'domain_age', status: 'done' });
+        const ageDetail =
+          resAge.domainAgeDays !== null
+            ? `${resAge.domainAgeDays.toLocaleString()}d old${resAge.registrar ? ` · ${resAge.registrar.slice(0, 24)}` : ''}`
+            : resAge.registrar
+            ? `Registrar: ${resAge.registrar.slice(0, 26)}`
+            : 'RDAP WHOIS queried';
+        sendEvent({
+          type: 'stage',
+          stage: 'domain_age',
+          status: 'done',
+          durationMs: Date.now() - parallelWaveStartMs,
+          detail: ageDetail,
+        });
       })
       .catch(() => {
         checkStatuses.domain_age = 'timed_out';
-        sendEvent({ type: 'stage', stage: 'domain_age', status: 'timed_out' });
+        sendEvent({
+          type: 'stage',
+          stage: 'domain_age',
+          status: 'timed_out',
+          durationMs: Date.now() - parallelWaveStartMs,
+          detail: 'RDAP registry timed out',
+        });
       });
 
     const repTask = checkReputationFeeds(host, sanitizedUrl)
       .then((clues) => {
         allClues.push(...clues);
         checkStatuses.reputation = 'done';
-        sendEvent({ type: 'stage', stage: 'reputation', status: 'done' });
+        sendEvent({
+          type: 'stage',
+          stage: 'reputation',
+          status: 'done',
+          durationMs: Date.now() - parallelWaveStartMs,
+          detail:
+            clues.length > 0
+              ? 'Listed on active threat feed!'
+              : 'No hits in OpenPhish / URLhaus',
+        });
       })
       .catch(() => {
         checkStatuses.reputation = 'failed';
-        sendEvent({ type: 'stage', stage: 'reputation', status: 'failed' });
+        sendEvent({
+          type: 'stage',
+          stage: 'reputation',
+          status: 'failed',
+          durationMs: Date.now() - parallelWaveStartMs,
+          detail: 'Threat feed check failed',
+        });
       });
 
     const pageTask = inspectRedirectsPageAndHeaders(sanitizedUrl, host)
@@ -2152,25 +2384,65 @@ async function startServer() {
         hasPasswordInput = resPage.hasPasswordInput;
         presentSecurityHeaders = resPage.presentSecurityHeaders;
         missingSecurityHeaders = resPage.missingSecurityHeaders;
+        const pageElapsed = Date.now() - parallelWaveStartMs;
 
         if (!resPage.reachable && !host.endsWith('.example')) {
           checkStatuses.redirects_page = 'timed_out';
           checkStatuses.security_posture = 'timed_out';
-          sendEvent({ type: 'stage', stage: 'redirects_page', status: 'timed_out' });
-          sendEvent({ type: 'stage', stage: 'security_posture', status: 'timed_out' });
+          sendEvent({
+            type: 'stage',
+            stage: 'redirects_page',
+            status: 'timed_out',
+            durationMs: pageElapsed,
+            detail: 'HTTP response timed out',
+          });
+          sendEvent({
+            type: 'stage',
+            stage: 'security_posture',
+            status: 'timed_out',
+            durationMs: pageElapsed,
+            detail: 'Headers unavailable',
+          });
           return;
         }
         allClues.push(...resPage.redirectAndPageClues, ...resPage.headerClues);
         checkStatuses.redirects_page = 'done';
         checkStatuses.security_posture = 'done';
-        sendEvent({ type: 'stage', stage: 'redirects_page', status: 'done' });
-        sendEvent({ type: 'stage', stage: 'security_posture', status: 'done' });
+        sendEvent({
+          type: 'stage',
+          stage: 'redirects_page',
+          status: 'done',
+          durationMs: pageElapsed,
+          detail: `HTTP ${resPage.httpStatus || 200} · ${Math.max(0, resPage.redirectChain.length - 1)} hop(s) · ${resPage.formsDetected} form(s)`,
+        });
+        sendEvent({
+          type: 'stage',
+          stage: 'security_posture',
+          status: 'done',
+          durationMs: pageElapsed,
+          detail: `${resPage.presentSecurityHeaders.length}/4 defensive headers (${
+            resPage.presentSecurityHeaders.join(', ') || 'none'
+          })`,
+        });
       })
       .catch(() => {
+        const pageElapsed = Date.now() - parallelWaveStartMs;
         checkStatuses.redirects_page = 'timed_out';
         checkStatuses.security_posture = 'timed_out';
-        sendEvent({ type: 'stage', stage: 'redirects_page', status: 'timed_out' });
-        sendEvent({ type: 'stage', stage: 'security_posture', status: 'timed_out' });
+        sendEvent({
+          type: 'stage',
+          stage: 'redirects_page',
+          status: 'timed_out',
+          durationMs: pageElapsed,
+          detail: 'HTTP inspection timed out',
+        });
+        sendEvent({
+          type: 'stage',
+          stage: 'security_posture',
+          status: 'timed_out',
+          durationMs: pageElapsed,
+          detail: 'Security headers timed out',
+        });
       });
 
     const certTask = inspectTlsCertificate(host, dnsSafety.resolvedIp)
@@ -2182,11 +2454,25 @@ async function startServer() {
         tlsValidFrom = resCert.tlsValidFrom;
         tlsValidTo = resCert.tlsValidTo;
         checkStatuses.certificate = 'done';
-        sendEvent({ type: 'stage', stage: 'certificate', status: 'done' });
+        sendEvent({
+          type: 'stage',
+          stage: 'certificate',
+          status: 'done',
+          durationMs: Date.now() - parallelWaveStartMs,
+          detail: resCert.tlsIssuer
+            ? `Valid TLS · ${resCert.tlsIssuer.slice(0, 28)}`
+            : 'No valid HTTPS certificate',
+        });
       })
       .catch(() => {
         checkStatuses.certificate = 'timed_out';
-        sendEvent({ type: 'stage', stage: 'certificate', status: 'timed_out' });
+        sendEvent({
+          type: 'stage',
+          stage: 'certificate',
+          status: 'timed_out',
+          durationMs: Date.now() - parallelWaveStartMs,
+          detail: 'TLS port 443 timed out',
+        });
       });
 
     const witnessTask = (async () => {
@@ -2226,7 +2512,13 @@ async function startServer() {
       }
 
       checkStatuses.witness = 'done';
-      sendEvent({ type: 'stage', stage: 'witness', status: 'done' });
+      sendEvent({
+        type: 'stage',
+        stage: 'witness',
+        status: 'done',
+        durationMs: Date.now() - parallelWaveStartMs,
+        detail: `${tempSummary.totalReports} witness report(s) · Web experience: ${webExperience.sentiment}`,
+      });
     })();
 
     await Promise.all([ageTask, repTask, pageTask, certTask, witnessTask]);
@@ -2276,9 +2568,9 @@ async function startServer() {
       (s) => s === 'timed_out' || s === 'failed'
     );
 
-    // Enforce strict 3.6-second total target budget so the full dossier always arrives in 3 to 5 seconds
+    // Enforce strict 2.6-second total target budget so the full dossier always arrives in 2 to 3 seconds
     const elapsedBeforeDeduction = Date.now() - investigationStartMs;
-    const remainingDeductionBudgetMs = Math.max(550, 3600 - elapsedBeforeDeduction);
+    const remainingDeductionBudgetMs = Math.max(0, 2600 - elapsedBeforeDeduction);
 
     const deduction = await generateSherlockDeduction(
       host,
@@ -2315,6 +2607,7 @@ async function startServer() {
       witness: witnessSummary,
       internetAssets,
       webExperience: webExperienceData,
+      stageTimings,
       inspectionDurationMs: Date.now() - investigationStartMs,
       checkStatuses,
       specialState,
