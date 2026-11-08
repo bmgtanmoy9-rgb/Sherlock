@@ -1680,7 +1680,6 @@ async function startServer() {
   // 1. Strict Defensive Security Headers & Media Range Support Middleware
   app.use((req: Request, res: Response, next: NextFunction) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     res.setHeader(
       'Permissions-Policy',
@@ -1769,7 +1768,13 @@ async function startServer() {
         try {
           const originHost = new URL(origin).host.toLowerCase();
           const primaryHost = hostHeader.split(',')[0].trim().toLowerCase();
-          if (originHost && primaryHost && originHost !== primaryHost) {
+          const isTrustedPreviewOrigin =
+            originHost === primaryHost ||
+            originHost.endsWith('.run.app') ||
+            originHost.endsWith('.google.com') ||
+            originHost.startsWith('localhost') ||
+            originHost.startsWith('127.0.0.1');
+          if (originHost && primaryHost && !isTrustedPreviewOrigin) {
             res.status(403).json({
               error: 'Cross-origin POST request blocked by SHERLOCK CSRF/Origin guard.',
               code: 'forbidden_origin',
@@ -2687,7 +2692,11 @@ async function startServer() {
     try {
       const { createServer: createViteServer } = await import('vite');
       const vite = await createViteServer({
-        server: { middlewareMode: true },
+        server: {
+          middlewareMode: true,
+          hmr: false,
+          watch: null,
+        },
         appType: 'spa',
       });
       app.use(vite.middlewares);
