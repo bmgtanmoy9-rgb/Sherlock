@@ -1,0 +1,6 @@
+{
+  "summary":  "Implementation plan to fix the Deterministic Score Breakdown by Category (adding a transparent total tally row, reputation override accounting, and interactive clue inspection) and resolve mobile hero video playback and cross-device responsiveness across all views.",
+  "updatedAt":  "2026-11-08T18:51:07.547012674Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

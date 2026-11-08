@@ -1,0 +1,6 @@
+{
+  "name": "SHERLOCK — The AI Digital Detective",
+  "description": "Investigate before you trust. Every website leaves clues. SHERLOCK finds them through deterministic forensic checks, witness intelligence, and plain-English deductions.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
