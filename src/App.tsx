@@ -47,6 +47,10 @@ import {
   ProofSection,
   StudyFooter,
 } from './components/StudySections';
+import {
+  applyDynamicSeo,
+  resolveSectionFromLocation,
+} from './utils/seoManager';
 
 const INITIAL_CHECK_STATUSES: Record<CheckStageId, CheckStatus> = {
   domain_identity: 'pending',
@@ -106,6 +110,11 @@ export default function App() {
       root.classList.add('dark');
     }
   }, [isLightTheme]);
+
+  // Dynamically update document title, meta description, Open Graph, Twitter Cards, and canonical URL
+  useEffect(() => {
+    applyDynamicSeo(activeSection, currentReport);
+  }, [activeSection, currentReport]);
 
   // Enforce mobile & desktop inline muted autoplay + seamless loop whenever on Home view
   useEffect(() => {
@@ -168,7 +177,7 @@ export default function App() {
     };
   }, [activeSection, heroVideoSrc]);
 
-  // Handle initial hash & shared case query param (?case=CASE-...)
+  // Handle initial path/hash & shared case query param (?case=CASE-...)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const sharedCaseId = params.get('case');
@@ -185,10 +194,16 @@ export default function App() {
         .catch(() => {});
     }
 
-    // Ensure every user lands on the Home investigation desk upon initial loading
-    setActiveSection('home');
-    if (window.location.hash && window.location.hash !== '#home') {
-      window.history.replaceState(null, '', '#home');
+    const pathname = window.location.pathname;
+    if (pathname && pathname !== '/' && pathname !== '/index.html') {
+      const resolvedFromPath = resolveSectionFromLocation(pathname, '');
+      setActiveSection(resolvedFromPath);
+    } else {
+      // Ensure every user on root '/' lands on the Home investigation desk upon initial loading
+      setActiveSection('home');
+      if (window.location.hash && window.location.hash !== '#home') {
+        window.history.replaceState(null, '', '#home');
+      }
     }
 
     const syncHash = () => {
@@ -202,7 +217,11 @@ export default function App() {
     };
 
     window.addEventListener('hashchange', syncHash);
-    return () => window.removeEventListener('hashchange', syncHash);
+    window.addEventListener('popstate', syncHash);
+    return () => {
+      window.removeEventListener('hashchange', syncHash);
+      window.removeEventListener('popstate', syncHash);
+    };
   }, []);
 
   // Show mobile sticky bottom bar only when active view is 'home' and scrolled past hero input

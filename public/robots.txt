@@ -1,0 +1,42 @@
+# SHERLOCK — The AI Digital Detective
+# Robots Exclusion Protocol & AI Search Crawler Directives
+
+User-agent: *
+Allow: /
+Allow: /guide
+Allow: /suspicion-index
+Allow: /what-to-do
+Allow: /witness-intelligence
+Allow: /safety-ethics
+Allow: /images/
+Allow: /assets/
+Disallow: /api/investigate
+Disallow: /api/report
+Disallow: /api/reviews
+
+# Explicit allow for AI search & answer engine crawlers
+User-agent: Googlebot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Bingbot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Applebot
+Allow: /
+
+Sitemap: https://ais-pre-zd6t5bbhqlsgjgzmvqwzgo-226281853003.asia-southeast1.run.app/sitemap.xml

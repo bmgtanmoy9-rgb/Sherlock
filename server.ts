@@ -2644,6 +2644,130 @@ async function startServer() {
     });
   });
 
+  // ============================================================================
+  // Technical SEO & AI Search Discovery Routes (/sitemap.xml, /robots.txt, /llms.txt)
+  // ============================================================================
+  const DEFAULT_CANONICAL_ORIGIN =
+    'https://ais-pre-zd6t5bbhqlsgjgzmvqwzgo-226281853003.asia-southeast1.run.app';
+
+  function resolveCanonicalBaseUrl(req: express.Request): string {
+    const envUrl = process.env.APP_URL?.trim();
+    if (envUrl && envUrl.startsWith('http')) {
+      return envUrl.replace(/\/+$/, '');
+    }
+    const host = req.headers.host;
+    if (host && !host.includes('localhost') && !host.includes('127.0.0.1') && !host.includes('0.0.0.0')) {
+      return `https://${host}`;
+    }
+    return DEFAULT_CANONICAL_ORIGIN;
+  }
+
+  app.get('/sitemap.xml', (req, res) => {
+    const baseUrl = resolveCanonicalBaseUrl(req);
+    const todayIso = new Date().toISOString().split('T')[0];
+    const publicPages = [
+      { path: '/', changefreq: 'daily', priority: '1.0' },
+      { path: '/guide', changefreq: 'weekly', priority: '0.9' },
+      { path: '/suspicion-index', changefreq: 'weekly', priority: '0.9' },
+      { path: '/what-to-do', changefreq: 'weekly', priority: '0.8' },
+      { path: '/witness-intelligence', changefreq: 'daily', priority: '0.8' },
+      { path: '/safety-ethics', changefreq: 'monthly', priority: '0.8' },
+    ];
+
+    const urlEntries = publicPages
+      .map(
+        (page) => `  <url>
+    <loc>${baseUrl}${page.path}</loc>
+    <lastmod>${todayIso}</lastmod>
+    <changefreq>${page.changefreq}</changefreq>
+    <priority>${page.priority}</priority>
+  </url>`
+      )
+      .join('\n');
+
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.sitemaps.org/schemas/sitemap/0.9 http://www.sitemaps.org/schemas/sitemap/0.9/sitemap.xsd">
+${urlEntries}
+</urlset>`;
+
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.status(200).send(xml);
+  });
+
+  app.get('/robots.txt', (req, res) => {
+    const baseUrl = resolveCanonicalBaseUrl(req);
+    const robotsTxt = `# SHERLOCK — The AI Digital Detective
+# Robots Exclusion Protocol & AI Search Crawler Directives
+
+User-agent: *
+Allow: /
+Allow: /guide
+Allow: /suspicion-index
+Allow: /what-to-do
+Allow: /witness-intelligence
+Allow: /safety-ethics
+Allow: /images/
+Allow: /assets/
+Disallow: /api/investigate
+Disallow: /api/report
+Disallow: /api/reviews
+
+User-agent: Googlebot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Bingbot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Applebot
+Allow: /
+
+Sitemap: ${baseUrl}/sitemap.xml
+`;
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.status(200).send(robotsTxt);
+  });
+
+  app.get('/llms.txt', (_req, res) => {
+    const llmsPath = path.join(__dirname, 'public', 'llms.txt');
+    if (fs.existsSync(llmsPath)) {
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.sendFile(llmsPath);
+      return;
+    }
+    res.status(404).type('text/plain').send('Not found');
+  });
+
+  app.get('/llms-full.txt', (_req, res) => {
+    const llmsFullPath = path.join(__dirname, 'public', 'llms-full.txt');
+    if (fs.existsSync(llmsFullPath)) {
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.sendFile(llmsFullPath);
+      return;
+    }
+    res.status(404).type('text/plain').send('Not found');
+  });
+
   const distPath = path.join(__dirname, 'dist');
   const distIndexExists = fs.existsSync(path.join(distPath, 'index.html'));
   const isProduction = process.env.NODE_ENV === 'production' && distIndexExists;
