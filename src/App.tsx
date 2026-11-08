@@ -10,8 +10,6 @@ import {
   CheckCircle2,
   ClipboardPaste,
   Clock,
-  ExternalLink,
-  Globe,
   Loader2,
   QrCode,
   Search,
@@ -24,7 +22,6 @@ import {
   CheckStageId,
   CheckStatus,
   SpecialStateType,
-  StageTimingInfo,
 } from './types/sherlock';
 import { CHECK_STAGES } from './engine/weightsConfig';
 import {
@@ -48,6 +45,17 @@ import {
   StudyFooter,
 } from './components/StudySections';
 
+const INITIAL_CHECK_STATUSES: Record<CheckStageId, CheckStatus> = {
+  domain_identity: 'pending',
+  impersonation: 'pending',
+  domain_age: 'pending',
+  reputation: 'pending',
+  redirects_page: 'pending',
+  certificate: 'pending',
+  security_posture: 'pending',
+  witness: 'pending',
+};
+
 export default function App() {
   const [activeSection, setActiveSection] = useState<string>('home');
   const [isLightTheme, setIsLightTheme] = useState<boolean>(false);
@@ -59,32 +67,15 @@ export default function App() {
     text: string;
   } | null>(null);
   const [isInvestigating, setIsInvestigating] = useState<boolean>(false);
-  const [showProgressPanel, setShowProgressPanel] = useState<boolean>(true);
+  const [showProgressPanel, setShowProgressPanel] = useState<boolean>(false);
   const [checkStatuses, setCheckStatuses] =
-    useState<Record<CheckStageId, CheckStatus>>(() => getWorkedExampleCaseReport().checkStatuses);
-  const [stageTimings, setStageTimings] = useState<
-    Partial<Record<CheckStageId, StageTimingInfo>>
-  >(() => ({
-    domain_identity: { durationMs: 14, detail: 'Digit-for-letter substitution flagged (paypa1)' },
-    impersonation: { durationMs: 19, detail: 'Impersonates PayPal (edit distance 1)' },
-    domain_age: { durationMs: 165, detail: '6d old · NameCheap, Inc.' },
-    reputation: { durationMs: 88, detail: 'Checked OpenPhish, URLhaus & PhishTank' },
-    redirects_page: { durationMs: 210, detail: 'HTTP 200 · 2 hop(s) · 1 password form' },
-    certificate: { durationMs: 140, detail: "Valid TLS · Let's Encrypt (R3) issued 5d ago" },
-    security_posture: { durationMs: 210, detail: '1/4 defensive headers (missing HSTS, CSP, XFO)' },
-    witness: { durationMs: 245, detail: '4 witness report(s) · Web experience: negative' },
-  }));
-  const [liveElapsedMs, setLiveElapsedMs] = useState<number>(0);
+    useState<Record<CheckStageId, CheckStatus>>(INITIAL_CHECK_STATUSES);
 
-  const [currentReport, setCurrentReport] = useState<CaseReportData | null>(() =>
-    getWorkedExampleCaseReport()
-  );
+  const [currentReport, setCurrentReport] = useState<CaseReportData | null>(null);
   const [specialStateError, setSpecialStateError] = useState<{
     state: SpecialStateType;
     message: string;
     targetHost?: string;
-    godaddyUrl?: string;
-    godaddyWhoisUrl?: string;
   } | null>(null);
 
   const [caseHistory, setCaseHistory] = useState<CaseReportData[]>(() => [
@@ -99,19 +90,7 @@ export default function App() {
   const urlInputRef = useRef<HTMLInputElement | null>(null);
   const heroSectionRef = useRef<HTMLDivElement | null>(null);
   const reportAnchorRef = useRef<HTMLDivElement | null>(null);
-  const dossierRef = useRef<HTMLDivElement | null>(null);
   const heroVideoRef = useRef<HTMLVideoElement | null>(null);
-
-  // Live millisecond stopwatch while an investigation is running
-  useEffect(() => {
-    if (!isInvestigating) return;
-    const startedAt = Date.now();
-    setLiveElapsedMs(0);
-    const interval = window.setInterval(() => {
-      setLiveElapsedMs(Date.now() - startedAt);
-    }, 80);
-    return () => window.clearInterval(interval);
-  }, [isInvestigating]);
 
   // Sync Dark / Daylight Study theme on <html>
   useEffect(() => {
@@ -194,10 +173,6 @@ export default function App() {
         .then((data: CaseReportData | null) => {
           if (data && data.id) {
             setCurrentReport(data);
-            setCheckStatuses(data.checkStatuses);
-            if (data.stageTimings) {
-              setStageTimings(data.stageTimings);
-            }
             setUrlInput(data.sanitizedUrl);
             setActiveSection('home');
           }
@@ -291,8 +266,7 @@ export default function App() {
 
   /**
    * Executes a live streamed investigation against POST /api/investigate,
-   * immediately scrolling to the Forensic Check Ledger on every device and updating
-   * each of the 8 check stages with real-time millisecond timings as chunks arrive.
+   * updating each of the 8 check stages as NDJSON stream chunks arrive.
    */
   const runInvestigation = async (rawTargetUrl: string, demoKey?: string) => {
     setInputNotice(null);
@@ -320,9 +294,6 @@ export default function App() {
           targetHost: trimmed,
         });
         setCurrentReport(null);
-        setTimeout(() => {
-          reportAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }, 40);
       } else {
         setInputNotice({
           type: 'error',
@@ -333,34 +304,26 @@ export default function App() {
     }
 
     const normalizedUrl = validation.sanitizedUrl!;
-    const startedMs = Date.now();
     setUrlInput(normalizedUrl);
     setIsInvestigating(true);
     setShowProgressPanel(true);
     setCurrentReport(null);
-    setStageTimings({});
     setCheckStatuses({
       domain_identity: 'running',
-      impersonation: 'running',
-      domain_age: 'running',
-      reputation: 'running',
-      redirects_page: 'running',
-      certificate: 'running',
-      security_posture: 'running',
-      witness: 'running',
+      impersonation: 'pending',
+      domain_age: 'pending',
+      reputation: 'pending',
+      redirects_page: 'pending',
+      certificate: 'pending',
+      security_posture: 'pending',
+      witness: 'pending',
     });
-
-    // Immediately scroll the viewport to the Forensic Check Ledger on mobile, tablet, and desktop
-    setTimeout(() => {
-      reportAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 35);
 
     try {
       const response = await fetch('/api/investigate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: normalizedUrl, demoKey }),
-        signal: AbortSignal.timeout(4800),
       });
 
       if (!response.body) {
@@ -379,51 +342,31 @@ export default function App() {
         buffer = lines.pop() ?? '';
 
         for (const line of lines) {
-          const trimmedLine = line.trim();
-          if (!trimmedLine) continue;
+          if (!line.trim()) continue;
           try {
-            const evt = JSON.parse(trimmedLine) as CheckProgressEvent;
+            const evt = JSON.parse(line) as CheckProgressEvent;
             if (evt.type === 'stage' && evt.stage && evt.status) {
               setCheckStatuses((prev) => ({
                 ...prev,
                 [evt.stage!]: evt.status!,
               }));
-              if (evt.durationMs !== undefined || evt.detail) {
-                setStageTimings((prev) => ({
-                  ...prev,
-                  [evt.stage!]: {
-                    durationMs: evt.durationMs ?? Math.max(12, Date.now() - startedMs),
-                    detail: evt.detail,
-                  },
-                }));
-              }
             } else if (evt.type === 'error') {
-              const errHost = evt.targetHost || validation.host || '';
-              const fallbackGodaddy = errHost
-                ? `https://www.godaddy.com/domainsearch/find?domainToCheck=${encodeURIComponent(errHost)}`
-                : 'https://www.godaddy.com/domainsearch/find';
-              const fallbackWhois = errHost
-                ? `https://www.godaddy.com/whois/results.aspx?domain=${encodeURIComponent(errHost)}`
-                : 'https://www.godaddy.com/whois';
-
               setSpecialStateError({
-                state: evt.errorCode || 'domain_not_found',
+                state: evt.errorCode || 'unreachable',
                 message: evt.message || 'Could not complete investigation.',
-                targetHost: errHost,
-                godaddyUrl: evt.godaddyUrl || fallbackGodaddy,
-                godaddyWhoisUrl: evt.godaddyWhoisUrl || fallbackWhois,
+                targetHost: validation.host,
               });
             } else if (evt.type === 'complete' && evt.report) {
               const rep = evt.report;
               setCheckStatuses(rep.checkStatuses);
-              if (rep.stageTimings) {
-                setStageTimings((prev) => ({ ...prev, ...rep.stageTimings }));
-              }
               setCurrentReport(rep);
               setCaseHistory((prev) => {
                 const filtered = prev.filter((item) => item.host !== rep.host);
                 return [rep, ...filtered].slice(0, 6);
               });
+              setTimeout(() => {
+                reportAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }, 120);
             }
           } catch {
             // Skip malformed chunk
@@ -431,82 +374,56 @@ export default function App() {
         }
       }
     } catch {
+      // Offline / fallback mock mode resilience if backend is temporarily unreachable
       const host = validation.host!;
+      let fallbackReport: CaseReportData;
       if (host === 'ox.ac.uk') {
-        const fallbackReport = getLegitimateDemoCase();
-        setCheckStatuses(fallbackReport.checkStatuses);
-        setCurrentReport(fallbackReport);
+        fallbackReport = getLegitimateDemoCase();
       } else if (host === 'dhl-parcel-redelivery-fee.example') {
-        const fallbackReport = getPadlockSuspiciousDemoCase();
-        setCheckStatuses(fallbackReport.checkStatuses);
-        setCurrentReport(fallbackReport);
-      } else if (host === 'paypa1-secure-login.example') {
-        const fallbackReport = getWorkedExampleCaseReport();
-        setCheckStatuses(fallbackReport.checkStatuses);
-        setCurrentReport(fallbackReport);
+        fallbackReport = getPadlockSuspiciousDemoCase();
       } else {
-        setSpecialStateError({
-          state: 'domain_not_found',
-          message: `The website "${host}" could not be reached or does not exist on the internet. Check GoDaddy below to verify whether this domain is registered.`,
-          targetHost: host,
-          godaddyUrl: `https://www.godaddy.com/domainsearch/find?domainToCheck=${encodeURIComponent(host)}`,
-          godaddyWhoisUrl: `https://www.godaddy.com/whois/results.aspx?domain=${encodeURIComponent(host)}`,
-        });
+        fallbackReport = getWorkedExampleCaseReport();
       }
+      setCheckStatuses(fallbackReport.checkStatuses);
+      setCurrentReport(fallbackReport);
     } finally {
       setIsInvestigating(false);
     }
   };
 
-  const renderCheckStatusBadge = (status: CheckStatus, timing?: StageTimingInfo) => {
-    const msBadge =
-      timing?.durationMs !== undefined ? (
-        <span className="font-mono-code tabular-nums text-[11px] text-[#D9C79F]/85">
-          {timing.durationMs}ms
-        </span>
-      ) : null;
-
+  const renderCheckStatusBadge = (status: CheckStatus) => {
     switch (status) {
       case 'done':
         return (
-          <span className="inline-flex items-center gap-2 font-mono-code text-xs font-semibold text-[#5E8B5A] shrink-0">
-            {msBadge}
-            <span className="inline-flex items-center gap-1">
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
-              <span>Done</span>
-            </span>
+          <span className="inline-flex items-center gap-1.5 font-mono-code text-xs font-semibold text-[#5E8B5A]">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <span>Done</span>
           </span>
         );
       case 'running':
         return (
-          <span className="inline-flex items-center gap-1.5 font-mono-code tabular-nums text-xs font-semibold text-[#F5CE7A] shrink-0">
+          <span className="inline-flex items-center gap-1.5 font-mono-code text-xs font-semibold text-[#F5CE7A]">
             <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-            <span>{(liveElapsedMs / 1000).toFixed(1)}s</span>
+            <span>Inspecting…</span>
           </span>
         );
       case 'timed_out':
         return (
-          <span className="inline-flex items-center gap-2 font-mono-code text-xs font-semibold text-[#D9A93A] shrink-0">
-            {msBadge}
-            <span className="inline-flex items-center gap-1">
-              <Clock className="w-4 h-4 shrink-0" />
-              <span>Timed out</span>
-            </span>
+          <span className="inline-flex items-center gap-1.5 font-mono-code text-xs font-semibold text-[#D9A93A]">
+            <Clock className="w-4 h-4 shrink-0" />
+            <span>Timed out</span>
           </span>
         );
       case 'failed':
         return (
-          <span className="inline-flex items-center gap-2 font-mono-code text-xs font-semibold text-[#B3342F] shrink-0">
-            {msBadge}
-            <span className="inline-flex items-center gap-1">
-              <XCircle className="w-4 h-4 shrink-0" />
-              <span>Failed</span>
-            </span>
+          <span className="inline-flex items-center gap-1.5 font-mono-code text-xs font-semibold text-[#B3342F]">
+            <XCircle className="w-4 h-4 shrink-0" />
+            <span>Failed</span>
           </span>
         );
       default:
         return (
-          <span className="inline-flex items-center gap-1.5 font-mono-code text-xs text-[#8A7F72] shrink-0">
+          <span className="inline-flex items-center gap-1.5 font-mono-code text-xs text-[#8A7F72]">
             <Clock className="w-3.5 h-3.5 shrink-0" />
             <span>Pending</span>
           </span>
@@ -720,40 +637,6 @@ export default function App() {
                             <QrCode className="w-4 h-4 text-[#C9A04A]" />
                             <span>Scan QR</span>
                           </button>
-
-                          <div className="flex flex-wrap items-center gap-1.5 sm:ml-auto">
-                            <span className="text-[11px] font-mono-code text-[#4A3024] uppercase tracking-wider">
-                              Quick Test:
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => runInvestigation('https://ox.ac.uk', 'legitimate')}
-                              className="min-h-[36px] px-2.5 py-1 rounded bg-[#FAF3E3] hover:bg-[#E8D9B5] border border-[#8C6645] text-[#1B1410] font-mono-code text-xs cursor-pointer"
-                            >
-                              ox.ac.uk
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                runInvestigation('https://paypa1-secure-login.example', 'phishing')
-                              }
-                              className="min-h-[36px] px-2.5 py-1 rounded bg-[#FAF3E3] hover:bg-[#E8D9B5] border border-[#8C6645] text-[#1B1410] font-mono-code text-xs cursor-pointer"
-                            >
-                              paypa1-secure-login
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                runInvestigation(
-                                  'https://dhl-parcel-redelivery-fee.example',
-                                  'padlock_suspicious'
-                                )
-                              }
-                              className="min-h-[36px] px-2.5 py-1 rounded bg-[#FAF3E3] hover:bg-[#E8D9B5] border border-[#8C6645] text-[#1B1410] font-mono-code text-xs cursor-pointer"
-                            >
-                              dhl-parcel-fee
-                            </button>
-                          </div>
                         </div>
 
                         {/* Friendly Validation Notice */}
@@ -801,126 +684,64 @@ export default function App() {
             {/* LIVE INVESTIGATION STREAMED PROGRESS & CASE REPORT AREA */}
             <div
               ref={reportAnchorRef}
-              className="max-w-[1440px] mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6 scroll-mt-16"
+              className="max-w-[1440px] mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6"
             >
-              {/* Streamed Forensic Check Ledger */}
+              {/* Streamed Progress List */}
               {showProgressPanel && (
                 <div
                   aria-live="polite"
                   className="rounded-lg bg-[#2A1A14] border-2 border-[#C9A04A] p-4 sm:p-6 shadow-xl space-y-4"
                 >
-                  {(() => {
-                    const completedCount = CHECK_STAGES.filter(
-                      (s) =>
-                        checkStatuses[s.id] === 'done' ||
-                        checkStatuses[s.id] === 'timed_out' ||
-                        checkStatuses[s.id] === 'failed'
-                    ).length;
-                    const progressPct = Math.round((completedCount / CHECK_STAGES.length) * 100);
-                    return (
-                      <>
-                        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#4A3024]">
-                          <div className="flex items-center gap-2.5">
-                            <span className="w-8 h-8 rounded-full bg-[#5A1F26] border border-[#C9A04A] flex items-center justify-center shrink-0">
-                              <Search
-                                className={`w-4 h-4 text-[#F5CE7A] ${
-                                  isInvestigating ? 'magnifying-sweep' : ''
-                                }`}
-                              />
-                            </span>
-                            <div>
-                              <h2 className="font-serif-display text-xl sm:text-2xl font-bold text-[#F5CE7A]">
-                                {isInvestigating
-                                  ? 'Live Forensic Investigation in Progress…'
-                                  : 'Forensic Check Ledger Complete'}
-                              </h2>
-                              <p className="text-xs text-[#D9C79F] font-mono-code tabular-nums">
-                                {completedCount} / {CHECK_STAGES.length} checks complete ·{' '}
-                                {isInvestigating
-                                  ? `Elapsed: ${(liveElapsedMs / 1000).toFixed(1)}s (target 2–3s)`
-                                  : currentReport?.inspectionDurationMs
-                                  ? `Completed in ${(currentReport.inspectionDurationMs / 1000).toFixed(2)}s`
-                                  : '2–3s parallel asset & review engine'}
-                              </p>
-                            </div>
-                          </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#4A3024]">
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-8 h-8 rounded-full bg-[#5A1F26] border border-[#C9A04A] flex items-center justify-center">
+                        <Search
+                          className={`w-4 h-4 text-[#F5CE7A] ${
+                            isInvestigating ? 'magnifying-sweep' : ''
+                          }`}
+                        />
+                      </span>
+                      <div>
+                        <h2 className="font-serif-display text-xl sm:text-2xl font-bold text-[#F5CE7A]">
+                          {isInvestigating
+                            ? 'Live Forensic Investigation in Progress…'
+                            : 'Forensic Check Ledger Complete'}
+                        </h2>
+                        <p className="text-xs text-[#D9C79F]">
+                          8 passive checks with 3.5s per-check timeouts · Target ~10 seconds full dossier
+                        </p>
+                      </div>
+                    </div>
 
-                          <div className="flex items-center gap-3">
-                            {!isInvestigating && currentReport && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  dossierRef.current?.scrollIntoView({
-                                    behavior: 'smooth',
-                                    block: 'start',
-                                  })
-                                }
-                                className="min-h-[36px] px-3 py-1 rounded bg-[#5A1F26] hover:bg-[#7C2F37] border border-[#C9A04A] text-xs font-semibold text-[#F5CE7A] cursor-pointer"
-                              >
-                                Jump to Verdict ({currentReport.index ?? '—'}/100)
-                              </button>
-                            )}
-                            {!isInvestigating && (
-                              <button
-                                type="button"
-                                onClick={() => setShowProgressPanel(false)}
-                                className="text-xs underline text-[#D9C79F] hover:text-[#F5CE7A] cursor-pointer"
-                              >
-                                Hide check ledger
-                              </button>
-                            )}
-                          </div>
-                        </div>
+                    {!isInvestigating && (
+                      <button
+                        type="button"
+                        onClick={() => setShowProgressPanel(false)}
+                        className="text-xs underline text-[#D9C79F] hover:text-[#F5CE7A] cursor-pointer"
+                      >
+                        Hide check ledger
+                      </button>
+                    )}
+                  </div>
 
-                        {/* Live 8-Stage Progress Bar */}
-                        <div className="w-full h-2 rounded-full bg-[#170E0B] border border-[#4A3024] overflow-hidden">
-                          <div
-                            className="h-full bg-gradient-to-r from-[#C9A04A] via-[#F5CE7A] to-[#5E8B5A] transition-all duration-200"
-                            style={{ width: `${Math.max(8, progressPct)}%` }}
-                          />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                    {CHECK_STAGES.map((stage) => {
+                      const status = checkStatuses[stage.id];
+                      return (
+                        <div
+                          key={stage.id}
+                          className="px-3.5 py-2.5 rounded bg-[#170E0B] border border-[#4A3024] flex items-center justify-between gap-3"
+                        >
+                          <span className="text-sm text-[#F2E6C9]">{stage.label}</span>
+                          {renderCheckStatusBadge(status)}
                         </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                          {CHECK_STAGES.map((stage) => {
-                            const status = checkStatuses[stage.id];
-                            const timing = stageTimings[stage.id];
-                            return (
-                              <button
-                                key={stage.id}
-                                type="button"
-                                onClick={() => {
-                                  if (currentReport) {
-                                    dossierRef.current?.scrollIntoView({
-                                      behavior: 'smooth',
-                                      block: 'start',
-                                    });
-                                  }
-                                }}
-                                className="w-full text-left px-3.5 py-2.5 rounded bg-[#170E0B] hover:bg-[#211410] border border-[#4A3024] hover:border-[#C9A04A]/60 flex items-center justify-between gap-3 transition-colors cursor-pointer"
-                              >
-                                <div className="min-w-0 flex-1">
-                                  <div className="text-sm font-medium text-[#F2E6C9] truncate">
-                                    {stage.label}
-                                  </div>
-                                  <div className="text-xs text-[#D9C79F]/80 font-mono-code truncate">
-                                    {timing?.detail ||
-                                      (status === 'running'
-                                        ? 'Querying live internet telemetry…'
-                                        : 'Awaiting telemetry')}
-                                  </div>
-                                </div>
-                                {renderCheckStatusBadge(status, timing)}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </>
-                    );
-                  })()}
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 
-              {/* Special States Card (Including Non-Existent Domain + GoDaddy Check) */}
+              {/* Special States Card */}
               {specialStateError && (
                 <div
                   role="alert"
@@ -940,18 +761,14 @@ export default function App() {
                           ? 'SSRF Safety Guard · Blocked Address'
                           : specialStateError.state === 'rate_limited'
                           ? 'Rate Limit Guard Active'
-                          : 'DNS & Registry Check · Website Does Not Exist'}
+                          : 'Target Unreachable'}
                       </span>
                       <h3 className="font-serif-display text-2xl font-bold text-[#F5CE7A]">
                         {specialStateError.state === 'blocked_url'
                           ? 'Investigation Blocked: Private or Restricted Network Address'
                           : specialStateError.state === 'rate_limited'
                           ? 'Investigation Paused: Rate Limit Reached'
-                          : `Website Does Not Exist${
-                              specialStateError.targetHost
-                                ? ` (${specialStateError.targetHost})`
-                                : ''
-                            }`}
+                          : 'Site Unreachable: Could Not Connect to Target Host'}
                       </h3>
                       <p className="text-sm sm:text-base text-[#D9C79F] leading-relaxed">
                         {specialStateError.message}
@@ -959,50 +776,14 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="pt-2 flex flex-wrap items-center gap-3">
-                    {(specialStateError.state === 'domain_not_found' ||
-                      specialStateError.state === 'unreachable') && (
-                      <>
-                        <a
-                          href={
-                            specialStateError.godaddyUrl ||
-                            `https://www.godaddy.com/domainsearch/find?domainToCheck=${encodeURIComponent(
-                              specialStateError.targetHost || ''
-                            )}`
-                          }
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="min-h-[46px] px-5 py-2.5 rounded brass-button font-bold text-sm inline-flex items-center justify-center gap-2 cursor-pointer"
-                        >
-                          <Globe className="w-4 h-4" />
-                          <span>Check Domain on GoDaddy</span>
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </a>
-
-                        <a
-                          href={
-                            specialStateError.godaddyWhoisUrl ||
-                            `https://www.godaddy.com/whois/results.aspx?domain=${encodeURIComponent(
-                              specialStateError.targetHost || ''
-                            )}`
-                          }
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="min-h-[46px] px-4 py-2.5 rounded bg-[#170E0B] hover:bg-[#231510] border border-[#C9A04A] text-[#F5CE7A] font-semibold text-sm inline-flex items-center justify-center gap-2 transition-colors cursor-pointer"
-                        >
-                          <span>GoDaddy WHOIS Lookup</span>
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </a>
-                      </>
-                    )}
-
+                  <div className="pt-2 flex flex-wrap gap-2.5">
                     <button
                       type="button"
                       onClick={() => {
                         setSpecialStateError(null);
                         handleFocusInvestigateInput();
                       }}
-                      className="min-h-[46px] px-4 py-2.5 rounded bg-[#5A1F26] hover:bg-[#7C2F37] border border-[#C9A04A]/70 text-[#F2E6C9] font-semibold text-sm cursor-pointer"
+                      className="min-h-[44px] px-4 py-2 rounded brass-button font-bold text-sm cursor-pointer"
                     >
                       Investigate a Different Link
                     </button>
@@ -1012,16 +793,13 @@ export default function App() {
 
               {/* Live Case Report Output */}
               {currentReport && (
-                <div ref={dossierRef} className="space-y-4 scroll-mt-16">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
                     <h2 className="font-serif-display text-2xl sm:text-3xl font-bold text-[#F5CE7A]">
                       Active Case Dossier
                     </h2>
-                    <span className="font-mono-code tabular-nums text-xs text-[#D9C79F]">
-                      {currentReport.inspectionDurationMs
-                        ? `Inspected in ${(currentReport.inspectionDurationMs / 1000).toFixed(2)}s · `
-                        : ''}
-                      Every score point maps to a real clue below
+                    <span className="font-mono-code text-xs text-[#D9C79F]">
+                      Every score point maps to a clue below
                     </span>
                   </div>
                   <CaseReportView

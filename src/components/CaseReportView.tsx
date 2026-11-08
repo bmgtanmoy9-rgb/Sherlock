@@ -7,14 +7,11 @@ import {
   ChevronUp,
   Clock,
   Copy,
-  ExternalLink,
   Flag,
-  Globe,
   HelpCircle,
   Info,
   Lock,
   RotateCcw,
-  Server,
   Share2,
   ShieldAlert,
   ShieldCheck,
@@ -818,282 +815,41 @@ export const CaseReportView: React.FC<CaseReportViewProps> = ({
           })()}
         </section>
 
-        {/* 6B. LIVE INTERNET ASSET & TECHNICAL FOOTPRINT */}
-        {report.internetAssets && (
-          <section
-            aria-label="Live Internet Asset & Technical Footprint"
-            className="rounded-md bg-[#170E0B] border border-[#4A3024] p-4 sm:p-5 space-y-4"
-          >
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#4A3024] pb-3">
-              <div className="flex items-center gap-2">
-                <Server className="w-5 h-5 text-[#C9A04A]" />
-                <div>
-                  <h4 className="font-serif-display text-xl font-bold text-[#F5CE7A]">
-                    Live Internet Asset &amp; Technical Footprint
-                  </h4>
-                  <p className="text-xs text-[#D9C79F]">
-                    Real-time DNS, RDAP WHOIS registrar, TLS X.509 certificate, and HTTP/HTML metadata
-                  </p>
-                </div>
-              </div>
-              <a
-                href={`https://www.godaddy.com/whois/results.aspx?domain=${encodeURIComponent(
-                  report.host
-                )}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-mono-code text-xs px-3 py-1.5 rounded bg-[#2A1A14] hover:bg-[#3A241C] border border-[#C9A04A]/60 text-[#F5CE7A] inline-flex items-center gap-1.5 transition-colors"
-              >
-                <Globe className="w-3.5 h-3.5 text-[#C9A04A]" />
-                <span>Verify on GoDaddy WHOIS</span>
-                <ExternalLink className="w-3 h-3" />
-              </a>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs sm:text-sm">
-              {/* DNS & Registrar Card */}
-              <div className="rounded bg-[#231510] border border-[#4A3024] p-3.5 space-y-2">
-                <div className="font-mono-code text-xs uppercase tracking-wider text-[#C9A04A]">
-                  DNS &amp; RDAP Registry Profile
-                </div>
-                <div className="space-y-1 text-[#F2E6C9]">
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="text-[#D9C79F]">Resolved IP(s):</span>
-                    <span className="font-mono-code text-right text-[#F5CE7A] tabular-nums">
-                      {report.internetAssets.resolvedIps.length > 0
-                        ? report.internetAssets.resolvedIps.slice(0, 3).join(', ')
-                        : 'Unresolved'}
-                    </span>
-                  </div>
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="text-[#D9C79F]">Registrar:</span>
-                    <span className="font-mono-code text-right">
-                      {report.internetAssets.registrar || 'Not published in public RDAP'}
-                    </span>
-                  </div>
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="text-[#D9C79F]">Registered Date:</span>
-                    <span className="font-mono-code text-right tabular-nums">
-                      {report.internetAssets.registeredAt
-                        ? `${report.internetAssets.registeredAt.slice(0, 10)}${
-                            report.internetAssets.domainAgeDays !== null
-                              ? ` (${report.internetAssets.domainAgeDays.toLocaleString()}d old)`
-                              : ''
-                          }`
-                        : 'Unavailable'}
-                    </span>
-                  </div>
-                  {report.internetAssets.expiresAt && (
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="text-[#D9C79F]">Registry Expiry:</span>
-                      <span className="font-mono-code text-right tabular-nums">
-                        {report.internetAssets.expiresAt.slice(0, 10)}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* TLS Certificate & HTTPS Card */}
-              <div className="rounded bg-[#231510] border border-[#4A3024] p-3.5 space-y-2">
-                <div className="font-mono-code text-xs uppercase tracking-wider text-[#C9A04A]">
-                  TLS / X.509 Certificate Profile
-                </div>
-                <div className="space-y-1 text-[#F2E6C9]">
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="text-[#D9C79F]">Certificate Issuer:</span>
-                    <span className="font-mono-code text-right text-[#F5CE7A]">
-                      {report.internetAssets.tlsIssuer || 'No valid TLS certificate'}
-                    </span>
-                  </div>
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="text-[#D9C79F]">Subject CN:</span>
-                    <span className="font-mono-code text-right break-all">
-                      {report.internetAssets.tlsSubject || report.host}
-                    </span>
-                  </div>
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="text-[#D9C79F]">Issued On:</span>
-                    <span className="font-mono-code text-right tabular-nums">
-                      {report.internetAssets.tlsValidFrom
-                        ? report.internetAssets.tlsValidFrom.slice(0, 10)
-                        : 'N/A'}
-                    </span>
-                  </div>
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="text-[#D9C79F]">Valid Until:</span>
-                    <span className="font-mono-code text-right tabular-nums">
-                      {report.internetAssets.tlsValidTo
-                        ? report.internetAssets.tlsValidTo.slice(0, 10)
-                        : 'N/A'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Live HTTP & HTML Metadata Card */}
-              <div className="md:col-span-2 rounded bg-[#231510] border border-[#4A3024] p-3.5 space-y-2">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-mono-code text-xs uppercase tracking-wider text-[#C9A04A]">
-                    Live HTTP Response &amp; HTML DOM Inspection
-                  </span>
-                  <span className="font-mono-code text-xs text-[#D9C79F] tabular-nums">
-                    HTTP Status: {report.internetAssets.httpStatus ?? 'Timed out'} · Forms:{' '}
-                    {report.internetAssets.formsDetected} · Password Input:{' '}
-                    {report.internetAssets.hasPasswordInput ? 'Yes' : 'No'}
-                  </span>
-                </div>
-
-                {report.internetAssets.pageTitle && (
-                  <p className="text-xs sm:text-sm text-[#F2E6C9]">
-                    <span className="text-[#D9C79F]">Page Title: </span>
-                    <strong className="font-semibold text-[#F5CE7A]">
-                      {report.internetAssets.pageTitle}
-                    </strong>
-                  </p>
-                )}
-
-                {report.internetAssets.metaDescription && (
-                  <p className="text-xs text-[#D9C79F] leading-relaxed">
-                    <span className="text-[#F2E6C9]/80">Meta Description: </span>
-                    {report.internetAssets.metaDescription}
-                  </p>
-                )}
-
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[#D9C79F] pt-1">
-                  <span>
-                    Active Headers:{' '}
-                    <strong className="font-mono-code text-[#5E8B5A]">
-                      {report.internetAssets.presentSecurityHeaders.length > 0
-                        ? report.internetAssets.presentSecurityHeaders.join(', ')
-                        : 'None'}
-                    </strong>
-                  </span>
-                  <span aria-hidden="true">·</span>
-                  <span>
-                    Missing Headers:{' '}
-                    <strong className="font-mono-code text-[#E9A872]">
-                      {report.internetAssets.missingSecurityHeaders.length > 0
-                        ? report.internetAssets.missingSecurityHeaders.join(', ')
-                        : 'None'}
-                    </strong>
-                  </span>
-                  {report.internetAssets.serverHeader && (
-                    <>
-                      <span aria-hidden="true">·</span>
-                      <span>
-                        Server:{' '}
-                        <strong className="font-mono-code text-[#F2E6C9]">
-                          {report.internetAssets.serverHeader}
-                        </strong>
-                      </span>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-          </section>
-        )}
-
-        {/* 7. PUBLIC INTERNET EXPERIENCE & WITNESS INTELLIGENCE */}
+        {/* 7. WITNESS INTELLIGENCE SUMMARY */}
         <section
-          aria-label="Witness Intelligence and Public Internet Experience"
-          className="rounded-md bg-[#170E0B] border border-[#4A3024] p-4 sm:p-5 space-y-4"
+          aria-label="Witness Intelligence Summary"
+          className="rounded-md bg-[#170E0B] border border-[#4A3024] p-4 sm:p-5 space-y-3"
         >
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#4A3024] pb-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Users className="w-5 h-5 text-[#C9A04A]" />
-              <div>
-                <h4 className="font-serif-display text-xl font-bold text-[#F5CE7A]">
-                  Public Internet Experience &amp; Witness Intelligence for {report.host}
-                </h4>
-                <p className="text-xs text-[#D9C79F]">
-                  Real user experiences found on the internet combined with community witness reports
-                </p>
-              </div>
+              <h4 className="font-serif-display text-xl font-bold text-[#F5CE7A]">
+                Witness Intelligence for {report.host}
+              </h4>
             </div>
             <span className="font-mono-code text-xs px-2.5 py-1 rounded bg-[#2A1A14] border border-[#4A3024] text-[#D9C79F]">
-              Capped at 10 pts · Corroborated with technical assets
+              Reported by users · Capped at 10 pts · Needs corroboration
             </span>
           </div>
 
-          {/* Public Internet Experience Grounding Card */}
-          {report.webExperience && (
-            <div className="rounded bg-[#231510] border border-[#C9A04A]/50 p-4 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-mono-code text-xs uppercase tracking-wider text-[#F5CE7A]">
-                  Internet-Wide User Experience &amp; Web Reputation
-                </span>
-                <span
-                  className={`font-mono-code text-xs font-bold px-2.5 py-0.5 rounded border ${
-                    report.webExperience.sentiment === 'positive'
-                      ? 'bg-[#5E8B5A]/25 border-[#5E8B5A] text-[#F2E6C9]'
-                      : report.webExperience.sentiment === 'negative'
-                      ? 'bg-[#B3342F]/25 border-[#B3342F] text-[#F5CE7A]'
-                      : 'bg-[#2A1A14] border-[#C9A04A]/60 text-[#D9C79F]'
-                  }`}
-                >
-                  {report.webExperience.sentiment === 'positive'
-                    ? 'Established Public Reputation'
-                    : report.webExperience.sentiment === 'negative'
-                    ? 'Public Scam / Phishing Warnings Reported'
-                    : report.webExperience.sentiment === 'mixed'
-                    ? 'Mixed Public Reviews'
-                    : 'Unverified / Limited Public Reviews'}
-                </span>
-              </div>
-
-              <p className="text-sm text-[#F2E6C9] leading-relaxed">
-                {report.webExperience.summary}
-              </p>
-
-              {report.webExperience.highlights.length > 0 && (
-                <ul className="space-y-1 text-xs sm:text-sm text-[#D9C79F] list-disc list-inside">
-                  {report.webExperience.highlights.map((item, idx) => (
-                    <li key={idx}>{item}</li>
-                  ))}
-                </ul>
-              )}
-
-              {report.webExperience.sources.length > 0 && (
-                <div className="pt-2 border-t border-[#4A3024] flex flex-wrap items-center gap-2 text-xs">
-                  <span className="text-[#D9C79F] font-mono-code">Reference Sources:</span>
-                  {report.webExperience.sources.map((src, idx) => (
-                    <a
-                      key={idx}
-                      href={src.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-[#170E0B] hover:bg-[#2A1A14] border border-[#4A3024] text-[#F5CE7A] transition-colors"
-                    >
-                      <span className="truncate max-w-[220px]">{src.title}</span>
-                      <ExternalLink className="w-3 h-3 shrink-0" />
-                    </a>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Local SHERLOCK Witness Reports */}
           {report.witness.totalReports === 0 ? (
             <p className="text-sm text-[#D9C79F]">
-              No local SHERLOCK witness reports are currently on file for{' '}
+              No community witness reports are currently on file for{' '}
               <span className="font-mono-code text-[#F2E6C9]">{report.host}</span>.
             </p>
           ) : (
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-4 text-sm text-[#F2E6C9]">
                 <span>
-                  Community Witness Reports:{' '}
-                  <strong className="font-mono-code text-[#F5CE7A] tabular-nums">
+                  Total Reports:{' '}
+                  <strong className="font-mono-code text-[#F5CE7A]">
                     {report.witness.totalReports}
                   </strong>
                 </span>
                 {report.witness.firstReported && (
                   <span>
                     First Reported:{' '}
-                    <span className="font-mono-code text-[#D9C79F] tabular-nums">
+                    <span className="font-mono-code text-[#D9C79F]">
                       {new Date(report.witness.firstReported).toLocaleDateString()}
                     </span>
                   </span>
@@ -1101,7 +857,7 @@ export const CaseReportView: React.FC<CaseReportViewProps> = ({
                 {report.witness.lastReported && (
                   <span>
                     Last Reported:{' '}
-                    <span className="font-mono-code text-[#D9C79F] tabular-nums">
+                    <span className="font-mono-code text-[#D9C79F]">
                       {new Date(report.witness.lastReported).toLocaleDateString()}
                     </span>
                   </span>
@@ -1117,7 +873,7 @@ export const CaseReportView: React.FC<CaseReportViewProps> = ({
                       className="text-xs px-2.5 py-1 rounded bg-[#2A1A14] border border-[#C9A04A]/50 text-[#F2E6C9]"
                     >
                       {WITNESS_CATEGORY_LABELS[cat]}:{' '}
-                      <strong className="font-mono-code text-[#F5CE7A] tabular-nums">{count}</strong>
+                      <strong className="font-mono-code text-[#F5CE7A]">{count}</strong>
                     </span>
                   ))}
               </div>
